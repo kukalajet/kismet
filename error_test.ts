@@ -294,7 +294,7 @@ Deno.test("error handling patterns", async (t) => {
       | ValidationError
       | NotFoundError;
 
-    function processError(error: CombinedError): string {
+    function processError(error: CombinedError): string | undefined {
       if (error instanceof DbError) {
         return `DB Error ${error.props.code}: ${error.props.query}`;
       }

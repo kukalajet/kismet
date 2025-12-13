@@ -41,7 +41,11 @@ export type TaggedError<Tag extends string = string> = {
  * // Result: { _tag: "ValidationError", field: "email", message: "Invalid format" }
  * ```
  */
-const TaggedError = <Tag extends string>(tag: Tag) => {
+const TaggedError = <Tag extends string>(
+  tag: Tag,
+): <A extends Record<string, unknown> = Record<string, never>>(
+  props?: A,
+) => TaggedError<Tag> & A => {
   return <A extends Record<string, unknown> = Record<string, never>>(
     props?: A,
   ): TaggedError<Tag> & A => ({ _tag: tag, ...(props as A) });
@@ -86,7 +90,9 @@ export const makeTaggedError = <
   Props extends Record<string, unknown>,
 >(
   tag: Tag,
-) => {
+): {
+  new (props: Props): Error & TaggedError<Tag> & { readonly props: Props };
+} => {
   return class extends Error implements TaggedError<Tag> {
     readonly _tag = tag;
     constructor(public readonly props: Props) {
@@ -109,7 +115,18 @@ export const makeTaggedError = <
  * });
  * ```
  */
-export const t = {
+export const t: {
+  readonly string: string;
+  readonly number: number;
+  readonly boolean: boolean;
+  readonly bigint: bigint;
+  readonly symbol: symbol;
+  readonly date: Date;
+  readonly array: <T>() => T[];
+  readonly optional: <T>() => T | undefined;
+  readonly nullable: <T>() => T | null;
+  readonly type: <T>() => T;
+} = {
   /** Define a string property */
   string: "" as string,
   /** Define a number property */
