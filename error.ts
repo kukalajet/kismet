@@ -1,3 +1,5 @@
+import type { Result } from "./result.ts";
+
 /**
  * Base interface for all typed errors.
  * The `_tag` field enables discriminated unions and exhaustive checking.
@@ -234,3 +236,109 @@ export const defineErrors = <
 export type ErrorsOf<D> = D extends Record<string, (...args: any) => infer E>
   ? E
   : never;
+
+/**
+ * Extract the error type from a Result type.
+ *
+ * @typeParam R - A Result type
+ * @returns The error type E from Result<T, E>
+ *
+ * @example
+ * ```typescript
+ * type MyResult = Result<string, { _tag: "NetworkError" } | { _tag: "ParseError" }>;
+ *
+ * type MyError = ErrorOf<MyResult>;
+ * // Type: { _tag: "NetworkError" } | { _tag: "ParseError" }
+ * ```
+ */
+export type ErrorOf<R> = R extends Result<unknown, infer E> ? E : never;
+
+/**
+ * Extract the success type from a Result type.
+ *
+ * @typeParam R - A Result type
+ * @returns The success type T from Result<T, E>
+ *
+ * @example
+ * ```typescript
+ * type MyResult = Result<{ id: number; name: string }, Error>;
+ *
+ * type MySuccess = SuccessOf<MyResult>;
+ * // Type: { id: number; name: string }
+ * ```
+ */
+export type SuccessOf<R> = R extends Result<infer T, unknown> ? T : never;
+
+/**
+ * Extract the `_tag` literal type from a tagged error.
+ *
+ * @typeParam E - A TaggedError type
+ * @returns The tag string literal type
+ *
+ * @example
+ * ```typescript
+ * type NetworkError = TaggedError<"NetworkError"> & { statusCode: number };
+ *
+ * type Tag = TagOf<NetworkError>;
+ * // Type: "NetworkError"
+ * ```
+ */
+export type TagOf<E> = E extends TaggedError<infer Tag> ? Tag : never;
+
+/**
+ * Get all possible tag literal types from an error union.
+ *
+ * @typeParam E - A union of TaggedError types
+ * @returns A union of all tag string literal types
+ *
+ * @example
+ * ```typescript
+ * type AppError =
+ *   | TaggedError<"NetworkError">
+ *   | TaggedError<"ValidationError">
+ *   | TaggedError<"AuthError">;
+ *
+ * type Tags = AllTags<AppError>;
+ * // Type: "NetworkError" | "ValidationError" | "AuthError"
+ * ```
+ */
+export type AllTags<E> = E extends TaggedError<infer Tag> ? Tag : never;
+
+/**
+ * Extract a specific error from a union by its tag.
+ *
+ * @typeParam E - A union of TaggedError types
+ * @typeParam Tag - The tag to extract
+ * @returns The error type with the matching tag
+ *
+ * @example
+ * ```typescript
+ * type AppError =
+ *   | (TaggedError<"NetworkError"> & { statusCode: number })
+ *   | (TaggedError<"ValidationError"> & { field: string });
+ *
+ * type NetworkErr = ErrorByTag<AppError, "NetworkError">;
+ * // Type: TaggedError<"NetworkError"> & { statusCode: number }
+ * ```
+ */
+export type ErrorByTag<E, Tag extends string> = Extract<E, { _tag: Tag }>;
+
+/**
+ * Remove a specific error from a union by its tag.
+ *
+ * @typeParam E - A union of TaggedError types
+ * @typeParam Tag - The tag to exclude
+ * @returns The error union without the specified tag
+ *
+ * @example
+ * ```typescript
+ * type AppError =
+ *   | TaggedError<"NetworkError">
+ *   | TaggedError<"ValidationError">
+ *   | TaggedError<"AuthError">;
+ *
+ * type NonNetworkErrors = ExcludeByTag<AppError, "NetworkError">;
+ * // Type: TaggedError<"ValidationError"> | TaggedError<"AuthError">
+ * ```
+ */
+export type ExcludeByTag<E, Tag extends string> = Exclude<E, { _tag: Tag }>;

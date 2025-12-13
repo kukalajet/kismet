@@ -1,11 +1,18 @@
 import { assertEquals, assertStrictEquals } from "@std/assert";
 import {
+  type AllTags,
   defineErrors,
+  type ErrorByTag,
+  type ErrorOf,
   type ErrorsOf,
+  type ExcludeByTag,
   makeTaggedError,
+  type SuccessOf,
   t as types,
   type TaggedError,
+  type TagOf,
 } from "./error.ts";
+import type { Result } from "./result.ts";
 
 // =============================================================================
 // Helper types for tests
@@ -1045,6 +1052,571 @@ Deno.test("ErrorsOf type helper", async (t) => {
 // =============================================================================
 // Integration tests for defineErrors workflow
 // =============================================================================
+
+// =============================================================================
+// Type helper utilities
+// =============================================================================
+
+Deno.test("ErrorOf type helper", async (t) => {
+  await t.step("extracts error type from Result", () => {
+    const UserErrors = defineErrors({
+      NotFound: { userId: types.string },
+      ValidationError: { field: types.string },
+    });
+
+    type UserError = ErrorsOf<typeof UserErrors>;
+    type UserResult = Result<{ id: string; name: string }, UserError>;
+
+    // ErrorOf should extract UserError
+    type ExtractedError = ErrorOf<UserResult>;
+
+    // Test that the extracted type works correctly by assigning to it
+    const error: ExtractedError = UserErrors.NotFound({ userId: "123" });
+    // Type assertion to access properties (TypeScript inference limitation)
+    const notFoundError = error as ReturnType<typeof UserErrors.NotFound>;
+    assertEquals(notFoundError._tag, "NotFound");
+    assertEquals(notFoundError.userId, "123");
+
+    const validationError: ExtractedError = UserErrors.ValidationError({
+      field: "email",
+    });
+    const valError = validationError as ReturnType<
+      typeof UserErrors.ValidationError
+    >;
+    assertEquals(valError._tag, "ValidationError");
+    assertEquals(valError.field, "email");
+  });
+
+  await t.step("works with simple error types", () => {
+    type SimpleResult = Result<string, { _tag: "Error"; message: string }>;
+    type ExtractedError = ErrorOf<SimpleResult>;
+
+    const error: ExtractedError = { _tag: "Error", message: "failed" };
+    const typedError = error as { _tag: "Error"; message: string };
+    assertEquals(typedError._tag, "Error");
+    assertEquals(typedError.message, "failed");
+  });
+
+  await t.step("works with union error types", () => {
+    type NetworkError = { _tag: "NetworkError"; statusCode: number };
+    type ParseError = { _tag: "ParseError"; data: string };
+    type MultiErrorResult = Result<number, NetworkError | ParseError>;
+    type ExtractedError = ErrorOf<MultiErrorResult>;
+
+    const networkError: ExtractedError = {
+      _tag: "NetworkError",
+      statusCode: 500,
+    };
+    const typedNetworkError = networkError as NetworkError | ParseError;
+    assertEquals(typedNetworkError._tag, "NetworkError");
+    if (typedNetworkError._tag === "NetworkError") {
+      assertEquals(typedNetworkError.statusCode, 500);
+    }
+
+    const parseError: ExtractedError = { _tag: "ParseError", data: "invalid" };
+    const typedParseError = parseError as NetworkError | ParseError;
+    assertEquals(typedParseError._tag, "ParseError");
+    if (typedParseError._tag === "ParseError") {
+      assertEquals(typedParseError.data, "invalid");
+    }
+  });
+});
+
+Deno.test("SuccessOf type helper", async (t) => {
+  await t.step("extracts success type from Result", () => {
+    type UserData = { id: string; name: string; email: string };
+    type UserResult = Result<UserData, { _tag: "Error" }>;
+    type ExtractedSuccess = SuccessOf<UserResult>;
+
+    const success: ExtractedSuccess = {
+      id: "123",
+      name: "John",
+      email: "john@example.com",
+    };
+    const typedSuccess = success as UserData;
+    assertEquals(typedSuccess.id, "123");
+    assertEquals(typedSuccess.name, "John");
+    assertEquals(typedSuccess.email, "john@example.com");
+  });
+
+  await t.step("works with primitive types", () => {
+    type StringResult = Result<string, { _tag: "Error" }>;
+    type NumberResult = Result<number, { _tag: "Error" }>;
+    type BooleanResult = Result<boolean, { _tag: "Error" }>;
+
+    type StringSuccess = SuccessOf<StringResult>;
+    type NumberSuccess = SuccessOf<NumberResult>;
+    type BooleanSuccess = SuccessOf<BooleanResult>;
+
+    const str: StringSuccess = "test";
+    const num: NumberSuccess = 42;
+    const bool: BooleanSuccess = true;
+
+    assertEquals(str, "test");
+    assertEquals(num, 42);
+    assertEquals(bool, true);
+  });
+
+  await t.step("works with complex nested types", () => {
+    type ComplexData = {
+      user: { id: string; profile: { name: string; age: number } };
+      settings: { theme: "light" | "dark"; notifications: boolean };
+    };
+    type ComplexResult = Result<ComplexData, { _tag: "Error" }>;
+    type ExtractedSuccess = SuccessOf<ComplexResult>;
+
+    const success: ExtractedSuccess = {
+      user: {
+        id: "user-1",
+        profile: { name: "Alice", age: 30 },
+      },
+      settings: {
+        theme: "dark",
+        notifications: true,
+      },
+    };
+
+    const typedSuccess = success as ComplexData;
+    assertEquals(typedSuccess.user.id, "user-1");
+    assertEquals(typedSuccess.user.profile.name, "Alice");
+    assertEquals(typedSuccess.settings.theme, "dark");
+  });
+
+  await t.step("works with array types", () => {
+    type ArrayResult = Result<string[], { _tag: "Error" }>;
+    type ExtractedSuccess = SuccessOf<ArrayResult>;
+
+    const success: ExtractedSuccess = ["a", "b", "c"];
+    const typedSuccess = success as string[];
+    assertEquals(typedSuccess.length, 3);
+    assertEquals(typedSuccess[0], "a");
+  });
+
+  await t.step("works with union success types", () => {
+    type UnionResult = Result<string | number, { _tag: "Error" }>;
+    type ExtractedSuccess = SuccessOf<UnionResult>;
+
+    const stringSuccess: ExtractedSuccess = "test";
+    const numberSuccess: ExtractedSuccess = 42;
+
+    assertEquals(stringSuccess, "test");
+    assertEquals(numberSuccess, 42);
+  });
+});
+
+Deno.test("TagOf type helper", async (t) => {
+  await t.step("extracts tag from tagged error", () => {
+    type NetworkError = TaggedError<"NetworkError"> & { statusCode: number };
+    type ExtractedTag = TagOf<NetworkError>;
+
+    // TypeScript should enforce that ExtractedTag is exactly "NetworkError"
+    const tag: ExtractedTag = "NetworkError";
+    assertEquals(tag, "NetworkError");
+  });
+
+  await t.step("works with multiple error types", () => {
+    type NotFoundError = TaggedError<"NotFound">;
+    type ValidationError = TaggedError<"ValidationError">;
+    type AuthError = TaggedError<"AuthError">;
+
+    type Tag1 = TagOf<NotFoundError>;
+    type Tag2 = TagOf<ValidationError>;
+    type Tag3 = TagOf<AuthError>;
+
+    const tag1: Tag1 = "NotFound";
+    const tag2: Tag2 = "ValidationError";
+    const tag3: Tag3 = "AuthError";
+
+    assertEquals(tag1, "NotFound");
+    assertEquals(tag2, "ValidationError");
+    assertEquals(tag3, "AuthError");
+  });
+
+  await t.step("extracts tag from error with complex properties", () => {
+    type ComplexError = TaggedError<"ComplexError"> & {
+      metadata: { user: string; timestamp: Date };
+      retryable: boolean;
+    };
+    type ExtractedTag = TagOf<ComplexError>;
+
+    const tag: ExtractedTag = "ComplexError";
+    assertEquals(tag, "ComplexError");
+  });
+});
+
+Deno.test("AllTags type helper", async (t) => {
+  await t.step("extracts all tags from error union", () => {
+    type AppError =
+      | TaggedError<"NetworkError">
+      | TaggedError<"ValidationError">
+      | TaggedError<"AuthError">;
+
+    type Tags = AllTags<AppError>;
+
+    // TypeScript should allow any of the three tags
+    const tag1: Tags = "NetworkError";
+    const tag2: Tags = "ValidationError";
+    const tag3: Tags = "AuthError";
+
+    assertEquals(tag1, "NetworkError");
+    assertEquals(tag2, "ValidationError");
+    assertEquals(tag3, "AuthError");
+  });
+
+  await t.step("works with errors with properties", () => {
+    type ErrorUnion =
+      | (TaggedError<"NotFound"> & { id: string })
+      | (TaggedError<"Forbidden"> & { action: string })
+      | (TaggedError<"ServerError"> & { code: number });
+
+    type Tags = AllTags<ErrorUnion>;
+
+    const tag1: Tags = "NotFound";
+    const tag2: Tags = "Forbidden";
+    const tag3: Tags = "ServerError";
+
+    assertEquals(tag1, "NotFound");
+    assertEquals(tag2, "Forbidden");
+    assertEquals(tag3, "ServerError");
+  });
+
+  await t.step("works with defineErrors result", () => {
+    const UserErrors = defineErrors({
+      NotFound: { userId: types.string },
+      InvalidEmail: { email: types.string },
+      Unauthorized: undefined,
+    });
+
+    type UserError = ErrorsOf<typeof UserErrors>;
+    type Tags = AllTags<UserError>;
+
+    const tag1: Tags = "NotFound";
+    const tag2: Tags = "InvalidEmail";
+    const tag3: Tags = "Unauthorized";
+
+    assertEquals(tag1, "NotFound");
+    assertEquals(tag2, "InvalidEmail");
+    assertEquals(tag3, "Unauthorized");
+  });
+
+  await t.step("used in exhaustive switch statements", () => {
+    const ApiErrors = defineErrors({
+      NetworkError: { statusCode: types.number },
+      ParseError: { data: types.string },
+      TimeoutError: undefined,
+    });
+
+    type ApiError = ErrorsOf<typeof ApiErrors>;
+    type ApiTag = AllTags<ApiError>;
+
+    function handleErrorTag(tag: ApiTag): string {
+      switch (tag) {
+        case "NetworkError":
+          return "network";
+        case "ParseError":
+          return "parse";
+        case "TimeoutError":
+          return "timeout";
+      }
+    }
+
+    assertEquals(handleErrorTag("NetworkError"), "network");
+    assertEquals(handleErrorTag("ParseError"), "parse");
+    assertEquals(handleErrorTag("TimeoutError"), "timeout");
+  });
+});
+
+Deno.test("ErrorByTag type helper", async (t) => {
+  await t.step("extracts specific error from union", () => {
+    type AppError =
+      | (TaggedError<"NetworkError"> & { statusCode: number })
+      | (TaggedError<"ValidationError"> & { field: string })
+      | (TaggedError<"AuthError"> & { token: string });
+
+    type NetworkErr = ErrorByTag<AppError, "NetworkError">;
+
+    const error: NetworkErr = { _tag: "NetworkError", statusCode: 500 };
+    assertEquals(error._tag, "NetworkError");
+    assertEquals(error.statusCode, 500);
+  });
+
+  await t.step("preserves error properties", () => {
+    const UserErrors = defineErrors({
+      NotFound: { userId: types.string, reason: types.string },
+      InvalidEmail: { email: types.string },
+      Unauthorized: undefined,
+    });
+
+    type UserError = ErrorsOf<typeof UserErrors>;
+    type NotFoundErr = ErrorByTag<UserError, "NotFound">;
+
+    const error: NotFoundErr = {
+      _tag: "NotFound",
+      userId: "user-123",
+      reason: "User does not exist",
+    };
+
+    assertEquals(error._tag, "NotFound");
+    assertEquals(error.userId, "user-123");
+    assertEquals(error.reason, "User does not exist");
+  });
+
+  await t.step("used for specific error handling", () => {
+    const ApiErrors = defineErrors({
+      NetworkError: { statusCode: types.number, retryable: types.boolean },
+      ParseError: { data: types.string },
+      TimeoutError: { duration: types.number },
+    });
+
+    type ApiError = ErrorsOf<typeof ApiErrors>;
+    type NetworkErr = ErrorByTag<ApiError, "NetworkError">;
+
+    function handleNetworkError(error: NetworkErr): string {
+      return error.retryable
+        ? `Retrying after ${error.statusCode}`
+        : `Failed with ${error.statusCode}`;
+    }
+
+    const retryableError: NetworkErr = {
+      _tag: "NetworkError",
+      statusCode: 503,
+      retryable: true,
+    };
+    assertEquals(handleNetworkError(retryableError), "Retrying after 503");
+
+    const nonRetryableError: NetworkErr = {
+      _tag: "NetworkError",
+      statusCode: 404,
+      retryable: false,
+    };
+    assertEquals(handleNetworkError(nonRetryableError), "Failed with 404");
+  });
+
+  await t.step("works with errors without properties", () => {
+    const Errors = defineErrors({
+      Unauthorized: undefined,
+      Forbidden: { resource: types.string },
+      NotFound: { id: types.string },
+    });
+
+    type AppError = ErrorsOf<typeof Errors>;
+    type UnauthorizedErr = ErrorByTag<AppError, "Unauthorized">;
+
+    const error: UnauthorizedErr = { _tag: "Unauthorized" };
+    assertEquals(error._tag, "Unauthorized");
+    assertEquals(Object.keys(error).length, 1);
+  });
+
+  await t.step("used in narrowing functions", () => {
+    const ValidationErrors = defineErrors({
+      Required: { field: types.string },
+      InvalidFormat: { field: types.string, pattern: types.string },
+      OutOfRange: { field: types.string, min: types.number, max: types.number },
+    });
+
+    type ValidationError = ErrorsOf<typeof ValidationErrors>;
+    type RequiredErr = ErrorByTag<ValidationError, "Required">;
+    type OutOfRangeErr = ErrorByTag<ValidationError, "OutOfRange">;
+
+    function isRequired(error: ValidationError): error is RequiredErr {
+      return error._tag === "Required";
+    }
+
+    function isOutOfRange(error: ValidationError): error is OutOfRangeErr {
+      return error._tag === "OutOfRange";
+    }
+
+    const requiredErr = ValidationErrors.Required({ field: "email" });
+    const outOfRangeErr = ValidationErrors.OutOfRange({
+      field: "age",
+      min: 0,
+      max: 120,
+    });
+
+    assertEquals(isRequired(requiredErr), true);
+    assertEquals(isRequired(outOfRangeErr), false);
+    assertEquals(isOutOfRange(outOfRangeErr), true);
+    assertEquals(isOutOfRange(requiredErr), false);
+  });
+});
+
+Deno.test("ExcludeByTag type helper", async (t) => {
+  await t.step("removes specific error from union", () => {
+    type AppError =
+      | (TaggedError<"NetworkError"> & { statusCode: number })
+      | (TaggedError<"ValidationError"> & { field: string })
+      | (TaggedError<"AuthError"> & { token: string });
+
+    type NonNetworkErrors = ExcludeByTag<AppError, "NetworkError">;
+
+    const validation: NonNetworkErrors = {
+      _tag: "ValidationError",
+      field: "email",
+    };
+    const auth: NonNetworkErrors = { _tag: "AuthError", token: "abc" };
+
+    assertEquals(validation._tag, "ValidationError");
+    assertEquals(auth._tag, "AuthError");
+  });
+
+  await t.step("removes multiple errors by chaining", () => {
+    const ApiErrors = defineErrors({
+      NetworkError: { statusCode: types.number },
+      ParseError: { data: types.string },
+      TimeoutError: undefined,
+      AuthError: { token: types.string },
+    });
+
+    type ApiError = ErrorsOf<typeof ApiErrors>;
+    type OnlyDataErrors = ExcludeByTag<
+      ExcludeByTag<ApiError, "NetworkError">,
+      "TimeoutError"
+    >;
+
+    const parseError: OnlyDataErrors = { _tag: "ParseError", data: "invalid" };
+    const authError: OnlyDataErrors = { _tag: "AuthError", token: "xyz" };
+
+    assertEquals(parseError._tag, "ParseError");
+    assertEquals(authError._tag, "AuthError");
+  });
+
+  await t.step("used for error filtering", () => {
+    const UserErrors = defineErrors({
+      NotFound: { userId: types.string },
+      InvalidEmail: { email: types.string },
+      InvalidAge: { age: types.number },
+      Unauthorized: undefined,
+    });
+
+    type UserError = ErrorsOf<typeof UserErrors>;
+    type ValidationErrors = ExcludeByTag<
+      ExcludeByTag<UserError, "NotFound">,
+      "Unauthorized"
+    >;
+
+    function handleValidationError(error: ValidationErrors): string {
+      switch (error._tag) {
+        case "InvalidEmail":
+          return `Email validation failed: ${error.email}`;
+        case "InvalidAge":
+          return `Age validation failed: ${error.age}`;
+      }
+    }
+
+    const emailError: ValidationErrors = {
+      _tag: "InvalidEmail",
+      email: "bad@email",
+    };
+    const ageError: ValidationErrors = { _tag: "InvalidAge", age: -5 };
+
+    assertEquals(
+      handleValidationError(emailError),
+      "Email validation failed: bad@email",
+    );
+    assertEquals(handleValidationError(ageError), "Age validation failed: -5");
+  });
+
+  await t.step("works with single error type remaining", () => {
+    const Errors = defineErrors({
+      ErrorA: { valueA: types.string },
+      ErrorB: { valueB: types.number },
+      ErrorC: undefined,
+    });
+
+    type AllErrors = ErrorsOf<typeof Errors>;
+    type OnlyErrorA = ExcludeByTag<ExcludeByTag<AllErrors, "ErrorB">, "ErrorC">;
+
+    const error: OnlyErrorA = { _tag: "ErrorA", valueA: "test" };
+    assertEquals(error._tag, "ErrorA");
+    assertEquals(error.valueA, "test");
+  });
+
+  await t.step("preserves type information after exclusion", () => {
+    const PaymentErrors = defineErrors({
+      InsufficientFunds: { balance: types.number, required: types.number },
+      InvalidCard: { last4: types.string, issuer: types.string },
+      NetworkError: { statusCode: types.number },
+      ProcessingError: { code: types.string },
+    });
+
+    type PaymentError = ErrorsOf<typeof PaymentErrors>;
+    type BusinessErrors = ExcludeByTag<
+      ExcludeByTag<PaymentError, "NetworkError">,
+      "ProcessingError"
+    >;
+
+    function getBusinessErrorMessage(error: BusinessErrors): string {
+      switch (error._tag) {
+        case "InsufficientFunds":
+          return `Need ${error.required}, have ${error.balance}`;
+        case "InvalidCard":
+          return `Invalid ${error.issuer} card ending in ${error.last4}`;
+      }
+    }
+
+    const insufficientFunds: BusinessErrors = {
+      _tag: "InsufficientFunds",
+      balance: 50,
+      required: 100,
+    };
+    const invalidCard: BusinessErrors = {
+      _tag: "InvalidCard",
+      last4: "1234",
+      issuer: "Visa",
+    };
+
+    assertEquals(
+      getBusinessErrorMessage(insufficientFunds),
+      "Need 100, have 50",
+    );
+    assertEquals(
+      getBusinessErrorMessage(invalidCard),
+      "Invalid Visa card ending in 1234",
+    );
+  });
+
+  await t.step("used in error transformation pipelines", () => {
+    const SourceErrors = defineErrors({
+      NetworkError: { statusCode: types.number },
+      DatabaseError: { query: types.string },
+      ValidationError: { field: types.string },
+    });
+
+    const TargetErrors = defineErrors({
+      ValidationError: { field: types.string },
+      SystemError: { message: types.string },
+    });
+
+    type SourceError = ErrorsOf<typeof SourceErrors>;
+    type TargetError = ErrorsOf<typeof TargetErrors>;
+    type SystemSourceErrors = ExcludeByTag<SourceError, "ValidationError">;
+
+    function transformError(error: SourceError): TargetError {
+      if (error._tag === "ValidationError") {
+        return TargetErrors.ValidationError({ field: error.field });
+      }
+
+      const systemError = error as SystemSourceErrors;
+      switch (systemError._tag) {
+        case "NetworkError":
+          return TargetErrors.SystemError({
+            message: `Network error: ${systemError.statusCode}`,
+          });
+        case "DatabaseError":
+          return TargetErrors.SystemError({
+            message: `Database error: ${systemError.query}`,
+          });
+      }
+    }
+
+    const networkErr = SourceErrors.NetworkError({ statusCode: 500 });
+    const transformed = transformError(networkErr);
+    assertEquals(transformed._tag, "SystemError");
+    if (transformed._tag === "SystemError") {
+      assertEquals(transformed.message, "Network error: 500");
+    }
+  });
+});
 
 Deno.test("defineErrors integration scenarios", async (t) => {
   await t.step("complete user service error handling", () => {
