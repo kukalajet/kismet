@@ -6,7 +6,6 @@ import {
   isErr,
   isOk,
   makeTaggedError,
-  matchExhaustive,
   t as typeHelpers,
   unknownError,
 } from "./mod.ts";
