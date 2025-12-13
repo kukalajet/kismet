@@ -1,5 +1,11 @@
 import { assertEquals, assertStrictEquals } from "@std/assert";
-import { makeTaggedError, type TaggedError } from "./error.ts";
+import {
+  defineErrors,
+  type ErrorsOf,
+  makeTaggedError,
+  t as types,
+  type TaggedError,
+} from "./error.ts";
 
 // =============================================================================
 // Helper types for tests
@@ -628,5 +634,555 @@ Deno.test("real-world usage examples", async (t) => {
     assertEquals(error.props.errors.length, 3);
     assertEquals(error.props.errors[0].field, "email");
     assertEquals(error.props.errors[1].message, "Password too short");
+  });
+});
+
+// =============================================================================
+// Type helper object (types)
+// =============================================================================
+
+Deno.test("type helper object (t)", async (t) => {
+  await t.step("t.string returns string type", () => {
+    const value = types.string;
+    assertEquals(typeof value, "string");
+    // Verify it's the empty string
+    assertEquals(value, "");
+  });
+
+  await t.step("t.number returns number type", () => {
+    const value = types.number;
+    assertEquals(typeof value, "number");
+    assertEquals(value, 0);
+  });
+
+  await t.step("t.boolean returns boolean type", () => {
+    const value = types.boolean;
+    assertEquals(typeof value, "boolean");
+    assertEquals(value, false);
+  });
+
+  await t.step("t.bigint returns bigint type", () => {
+    const value = types.bigint;
+    assertEquals(typeof value, "bigint");
+    assertEquals(value, 0n);
+  });
+
+  await t.step("t.symbol returns symbol type", () => {
+    const value = types.symbol;
+    assertEquals(typeof value, "symbol");
+  });
+
+  await t.step("t.date returns Date type", () => {
+    const value = types.date;
+    assertEquals(value instanceof Date, true);
+  });
+
+  await t.step("t.array() returns empty array", () => {
+    const stringArray = types.array<string>();
+    assertEquals(Array.isArray(stringArray), true);
+    assertEquals(stringArray.length, 0);
+
+    const numberArray = types.array<number>();
+    assertEquals(Array.isArray(numberArray), true);
+    assertEquals(numberArray.length, 0);
+  });
+
+  await t.step("t.optional() returns undefined", () => {
+    const value = types.optional<string>();
+    assertEquals(value, undefined);
+  });
+
+  await t.step("t.nullable() returns null", () => {
+    const value = types.nullable<string>();
+    assertEquals(value, null);
+  });
+
+  await t.step("t.type() returns undefined for custom types", () => {
+    type CustomType = { foo: string; bar: number };
+    const value = types.type<CustomType>();
+    assertEquals(value, undefined);
+  });
+
+  await t.step("type helpers used in error definitions", () => {
+    // This demonstrates the intended usage pattern
+    const errorDef = {
+      NetworkError: { statusCode: types.number, message: types.string },
+      NotFound: { id: types.string },
+      ValidationError: {
+        fields: types.array<string>(),
+        timestamp: types.date,
+      },
+    };
+
+    assertEquals(typeof errorDef.NetworkError.statusCode, "number");
+    assertEquals(typeof errorDef.NetworkError.message, "string");
+    assertEquals(typeof errorDef.NotFound.id, "string");
+    assertEquals(Array.isArray(errorDef.ValidationError.fields), true);
+    assertEquals(errorDef.ValidationError.timestamp instanceof Date, true);
+  });
+});
+
+// =============================================================================
+// defineErrors function
+// =============================================================================
+
+Deno.test("defineErrors", async (t) => {
+  await t.step("creates error factories with properties", () => {
+    const Errors = defineErrors({
+      NotFound: { id: types.string },
+      ValidationError: { field: types.string, message: types.string },
+    });
+
+    const notFound = Errors.NotFound({ id: "123" });
+    assertEquals(notFound._tag, "NotFound");
+    assertEquals(notFound.id, "123");
+
+    const validation = Errors.ValidationError({
+      field: "email",
+      message: "Invalid",
+    });
+    assertEquals(validation._tag, "ValidationError");
+    assertEquals(validation.field, "email");
+    assertEquals(validation.message, "Invalid");
+  });
+
+  await t.step("creates error factories without properties", () => {
+    const Errors = defineErrors({
+      Unauthorized: undefined,
+      Timeout: undefined,
+    });
+
+    const unauthorized = Errors.Unauthorized();
+    assertEquals(unauthorized._tag, "Unauthorized");
+    assertEquals(Object.keys(unauthorized).length, 1); // Only _tag
+
+    const timeout = Errors.Timeout();
+    assertEquals(timeout._tag, "Timeout");
+  });
+
+  await t.step("mixes errors with and without properties", () => {
+    const Errors = defineErrors({
+      NotFound: { resourceId: types.string },
+      Unauthorized: undefined,
+      BadRequest: { reason: types.string },
+    });
+
+    const notFound = Errors.NotFound({ resourceId: "user-123" });
+    assertEquals(notFound._tag, "NotFound");
+    assertEquals(notFound.resourceId, "user-123");
+
+    const unauthorized = Errors.Unauthorized();
+    assertEquals(unauthorized._tag, "Unauthorized");
+
+    const badRequest = Errors.BadRequest({ reason: "Invalid input" });
+    assertEquals(badRequest._tag, "BadRequest");
+    assertEquals(badRequest.reason, "Invalid input");
+  });
+
+  await t.step("supports all type helpers", () => {
+    const Errors = defineErrors({
+      StringError: { value: types.string },
+      NumberError: { code: types.number },
+      BooleanError: { flag: types.boolean },
+      BigIntError: { bigNum: types.bigint },
+      DateError: { timestamp: types.date },
+      ArrayError: { items: types.array<number>() },
+      OptionalError: { maybe: types.optional<string>() },
+      NullableError: { nullValue: types.nullable<number>() },
+    });
+
+    const stringErr = Errors.StringError({ value: "test" });
+    assertEquals(stringErr.value, "test");
+
+    const numberErr = Errors.NumberError({ code: 42 });
+    assertEquals(numberErr.code, 42);
+
+    const boolErr = Errors.BooleanError({ flag: true });
+    assertEquals(boolErr.flag, true);
+
+    const bigIntErr = Errors.BigIntError({ bigNum: 100n });
+    assertEquals(bigIntErr.bigNum, 100n);
+
+    const date = new Date();
+    const dateErr = Errors.DateError({ timestamp: date });
+    assertStrictEquals(dateErr.timestamp, date);
+
+    const arrayErr = Errors.ArrayError({ items: [1, 2, 3] });
+    assertEquals(arrayErr.items, [1, 2, 3]);
+
+    const optionalErr = Errors.OptionalError({ maybe: undefined });
+    assertEquals(optionalErr.maybe, undefined);
+
+    const nullableErr = Errors.NullableError({ nullValue: null });
+    assertEquals(nullableErr.nullValue, null);
+  });
+
+  await t.step("supports complex nested objects", () => {
+    const Errors = defineErrors({
+      ComplexError: {
+        metadata: {
+          user: types.string,
+          timestamp: types.date,
+          retryCount: types.number,
+        } as { user: string; timestamp: Date; retryCount: number },
+      },
+    });
+
+    const date = new Date();
+    const error = Errors.ComplexError({
+      metadata: {
+        user: "john",
+        timestamp: date,
+        retryCount: 3,
+      },
+    });
+
+    assertEquals(error._tag, "ComplexError");
+    assertEquals(error.metadata.user, "john");
+    assertStrictEquals(error.metadata.timestamp, date);
+    assertEquals(error.metadata.retryCount, 3);
+  });
+
+  await t.step("created errors work with discriminated unions", () => {
+    const ApiErrors = defineErrors({
+      NotFound: { resourceId: types.string },
+      Forbidden: { action: types.string },
+      ServerError: { code: types.number },
+    });
+
+    type ApiError = ErrorsOf<typeof ApiErrors>;
+
+    function handleError(error: ApiError): string {
+      switch (error._tag) {
+        case "NotFound":
+          return `Not found: ${error.resourceId}`;
+        case "Forbidden":
+          return `Forbidden: ${error.action}`;
+        case "ServerError":
+          return `Server error: ${error.code}`;
+      }
+    }
+
+    const notFound = ApiErrors.NotFound({ resourceId: "user-123" });
+    assertEquals(handleError(notFound), "Not found: user-123");
+
+    const forbidden = ApiErrors.Forbidden({ action: "delete" });
+    assertEquals(handleError(forbidden), "Forbidden: delete");
+
+    const serverError = ApiErrors.ServerError({ code: 500 });
+    assertEquals(handleError(serverError), "Server error: 500");
+  });
+
+  await t.step("supports old syntax with type casting", () => {
+    const Errors = defineErrors({
+      NotFound: { userId: "" as string },
+      InvalidEmail: { email: "" as string },
+      InvalidAge: { age: 0 as number, reason: "" as string },
+    });
+
+    const notFound = Errors.NotFound({ userId: "123" });
+    assertEquals(notFound._tag, "NotFound");
+    assertEquals(notFound.userId, "123");
+
+    const invalidEmail = Errors.InvalidEmail({ email: "bad@email" });
+    assertEquals(invalidEmail._tag, "InvalidEmail");
+    assertEquals(invalidEmail.email, "bad@email");
+
+    const invalidAge = Errors.InvalidAge({ age: -5, reason: "negative" });
+    assertEquals(invalidAge._tag, "InvalidAge");
+    assertEquals(invalidAge.age, -5);
+    assertEquals(invalidAge.reason, "negative");
+  });
+
+  await t.step("multiple instances are independent", () => {
+    const Errors = defineErrors({
+      TestError: { id: types.number },
+    });
+
+    const error1 = Errors.TestError({ id: 1 });
+    const error2 = Errors.TestError({ id: 2 });
+
+    assertEquals(error1.id, 1);
+    assertEquals(error2.id, 2);
+
+    // Modifying one doesn't affect the other
+    error1.id = 100;
+    assertEquals(error1.id, 100);
+    assertEquals(error2.id, 2);
+  });
+
+  await t.step("empty error definitions object", () => {
+    const Errors = defineErrors({});
+    assertEquals(Object.keys(Errors).length, 0);
+  });
+
+  await t.step("single error definition", () => {
+    const Errors = defineErrors({
+      SingleError: { message: types.string },
+    });
+
+    const error = Errors.SingleError({ message: "test" });
+    assertEquals(error._tag, "SingleError");
+    assertEquals(error.message, "test");
+  });
+});
+
+// =============================================================================
+// ErrorsOf type helper
+// =============================================================================
+
+Deno.test("ErrorsOf type helper", async (t) => {
+  await t.step("extracts union type from error definitions", () => {
+    const UserErrors = defineErrors({
+      NotFound: { userId: types.string },
+      InvalidEmail: { email: types.string },
+      Unauthorized: undefined,
+    });
+
+    type UserError = ErrorsOf<typeof UserErrors>;
+
+    // Test that all error types are included in the union
+    const notFound: UserError = UserErrors.NotFound({ userId: "123" });
+    assertEquals(notFound._tag, "NotFound");
+
+    const invalidEmail: UserError = UserErrors.InvalidEmail({
+      email: "bad",
+    });
+    assertEquals(invalidEmail._tag, "InvalidEmail");
+
+    const unauthorized: UserError = UserErrors.Unauthorized();
+    assertEquals(unauthorized._tag, "Unauthorized");
+  });
+
+  await t.step("works with exhaustive pattern matching", () => {
+    const PaymentErrors = defineErrors({
+      InsufficientFunds: { balance: types.number, required: types.number },
+      InvalidCard: { last4: types.string },
+      ProcessingFailed: { reason: types.string },
+    });
+
+    type PaymentError = ErrorsOf<typeof PaymentErrors>;
+
+    function getErrorMessage(error: PaymentError): string {
+      switch (error._tag) {
+        case "InsufficientFunds":
+          return `Need ${error.required}, have ${error.balance}`;
+        case "InvalidCard":
+          return `Card ending in ${error.last4} is invalid`;
+        case "ProcessingFailed":
+          return `Processing failed: ${error.reason}`;
+      }
+    }
+
+    const insufficientFunds = PaymentErrors.InsufficientFunds({
+      balance: 10,
+      required: 100,
+    });
+    assertEquals(getErrorMessage(insufficientFunds), "Need 100, have 10");
+
+    const invalidCard = PaymentErrors.InvalidCard({ last4: "1234" });
+    assertEquals(
+      getErrorMessage(invalidCard),
+      "Card ending in 1234 is invalid",
+    );
+
+    const processingFailed = PaymentErrors.ProcessingFailed({
+      reason: "Network timeout",
+    });
+    assertEquals(
+      getErrorMessage(processingFailed),
+      "Processing failed: Network timeout",
+    );
+  });
+
+  await t.step("works with function return types", () => {
+    const DbErrors = defineErrors({
+      ConnectionFailed: { host: types.string },
+      QueryFailed: { query: types.string },
+    });
+
+    type DbError = ErrorsOf<typeof DbErrors>;
+
+    function simulateDbOperation(shouldFail: boolean): DbError | null {
+      if (shouldFail) {
+        return DbErrors.ConnectionFailed({ host: "localhost" });
+      }
+      return null;
+    }
+
+    const error = simulateDbOperation(true);
+    assertEquals(error?._tag, "ConnectionFailed");
+    assertEquals(error && "host" in error ? error.host : null, "localhost");
+
+    const success = simulateDbOperation(false);
+    assertEquals(success, null);
+  });
+
+  await t.step("preserves type information in generic functions", () => {
+    const ValidationErrors = defineErrors({
+      Required: { field: types.string },
+      TooLong: { field: types.string, maxLength: types.number },
+    });
+
+    type ValidationError = ErrorsOf<typeof ValidationErrors>;
+
+    function createValidator<E extends ValidationError>(
+      errorFactory: () => E,
+    ): () => E {
+      return errorFactory;
+    }
+
+    const requiredValidator = createValidator(() =>
+      ValidationErrors.Required({ field: "email" })
+    );
+    const error = requiredValidator();
+
+    assertEquals(error._tag, "Required");
+    assertEquals(error.field, "email");
+  });
+});
+
+// =============================================================================
+// Integration tests for defineErrors workflow
+// =============================================================================
+
+Deno.test("defineErrors integration scenarios", async (t) => {
+  await t.step("complete user service error handling", () => {
+    // Define all errors for a user service
+    const UserErrors = defineErrors({
+      NotFound: { userId: types.string },
+      EmailTaken: { email: types.string },
+      InvalidAge: { age: types.number, min: types.number },
+      Unauthorized: undefined,
+    });
+
+    type UserError = ErrorsOf<typeof UserErrors>;
+
+    // Simulate service functions
+    function findUser(id: string): { id: string; email: string } | UserError {
+      if (id === "missing") {
+        return UserErrors.NotFound({ userId: id });
+      }
+      return { id, email: "user@example.com" };
+    }
+
+    function createUser(
+      email: string,
+      age: number,
+    ): { id: string; email: string } | UserError {
+      if (email === "taken@example.com") {
+        return UserErrors.EmailTaken({ email });
+      }
+      if (age < 18) {
+        return UserErrors.InvalidAge({ age, min: 18 });
+      }
+      return { id: "new-id", email };
+    }
+
+    // Test successful case
+    const user = findUser("123");
+    if ("_tag" in user) {
+      throw new Error("Should not be an error");
+    }
+    assertEquals(user.id, "123");
+
+    // Test error case
+    const notFound = findUser("missing");
+    if (!("_tag" in notFound)) {
+      throw new Error("Should be an error");
+    }
+    assertEquals(notFound._tag, "NotFound");
+    if (notFound._tag === "NotFound") {
+      assertEquals(notFound.userId, "missing");
+    }
+
+    // Test creation errors
+    const emailTaken = createUser("taken@example.com", 25);
+    if (!("_tag" in emailTaken)) {
+      throw new Error("Should be an error");
+    }
+    assertEquals(emailTaken._tag, "EmailTaken");
+
+    const invalidAge = createUser("new@example.com", 15);
+    if (!("_tag" in invalidAge)) {
+      throw new Error("Should be an error");
+    }
+    assertEquals(invalidAge._tag, "InvalidAge");
+    if (invalidAge._tag === "InvalidAge") {
+      assertEquals(invalidAge.age, 15);
+      assertEquals(invalidAge.min, 18);
+    }
+  });
+
+  await t.step("error mapping and transformation", () => {
+    const ApiErrors = defineErrors({
+      NetworkError: { statusCode: types.number },
+      ParseError: { data: types.string },
+    });
+
+    const UserErrors = defineErrors({
+      NotFound: { userId: types.string },
+      ServiceUnavailable: undefined,
+    });
+
+    type ApiError = ErrorsOf<typeof ApiErrors>;
+    type UserError = ErrorsOf<typeof UserErrors>;
+
+    // Map API errors to User errors
+    function mapError(apiError: ApiError): UserError {
+      switch (apiError._tag) {
+        case "NetworkError":
+          return apiError.statusCode === 404
+            ? UserErrors.NotFound({ userId: "unknown" })
+            : UserErrors.ServiceUnavailable();
+        case "ParseError":
+          return UserErrors.ServiceUnavailable();
+      }
+    }
+
+    const networkError = ApiErrors.NetworkError({ statusCode: 404 });
+    const mappedNotFound = mapError(networkError);
+    assertEquals(mappedNotFound._tag, "NotFound");
+
+    const parseError = ApiErrors.ParseError({ data: "invalid" });
+    const mappedUnavailable = mapError(parseError);
+    assertEquals(mappedUnavailable._tag, "ServiceUnavailable");
+  });
+
+  await t.step("error aggregation and collection", () => {
+    const ValidationErrors = defineErrors({
+      Required: { field: types.string },
+      InvalidFormat: { field: types.string, pattern: types.string },
+      OutOfRange: { field: types.string, min: types.number, max: types.number },
+    });
+
+    type ValidationError = ErrorsOf<typeof ValidationErrors>;
+
+    const errors: ValidationError[] = [
+      ValidationErrors.Required({ field: "email" }),
+      ValidationErrors.InvalidFormat({ field: "phone", pattern: "^\\d+$" }),
+      ValidationErrors.OutOfRange({ field: "age", min: 0, max: 120 }),
+    ];
+
+    assertEquals(errors.length, 3);
+    assertEquals(errors[0]._tag, "Required");
+    assertEquals(errors[1]._tag, "InvalidFormat");
+    assertEquals(errors[2]._tag, "OutOfRange");
+
+    // Group by tag
+    const grouped = errors.reduce(
+      (acc, err) => {
+        if (!acc[err._tag]) {
+          acc[err._tag] = [];
+        }
+        acc[err._tag].push(err);
+        return acc;
+      },
+      {} as Record<string, ValidationError[]>,
+    );
+
+    assertEquals(grouped["Required"].length, 1);
+    assertEquals(grouped["InvalidFormat"].length, 1);
+    assertEquals(grouped["OutOfRange"].length, 1);
   });
 });

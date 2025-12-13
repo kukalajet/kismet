@@ -93,3 +93,144 @@ export const makeTaggedError = <
     }
   };
 };
+
+/**
+ * Type helper functions for defining error property types.
+ * These provide a more ergonomic syntax than casting (e.g., "" as string).
+ *
+ * @example
+ * ```typescript
+ * const UserErrors = defineErrors({
+ *   NotFound: { userId: t.string },
+ *   InvalidAge: { age: t.number },
+ *   IsActive: { active: t.boolean },
+ * });
+ * ```
+ */
+export const t = {
+  /** Define a string property */
+  string: "" as string,
+  /** Define a number property */
+  number: 0 as number,
+  /** Define a boolean property */
+  boolean: false as boolean,
+  /** Define a bigint property */
+  bigint: 0n as bigint,
+  /** Define a symbol property */
+  symbol: Symbol(),
+  /** Define a Date property */
+  date: new Date(),
+  /** Define an array property of a specific type */
+  array: <T>(): T[] => [] as T[],
+  /** Define an optional property of a specific type */
+  optional: <T>(): T | undefined => undefined as T | undefined,
+  /** Define a nullable property of a specific type */
+  nullable: <T>(): T | null => null as T | null,
+  /** Define a custom type property */
+  type: <T>(): T => undefined as T,
+} as const;
+
+/**
+ * Define a set of typed errors for a module or domain.
+ * Creates factory functions for each error type with proper typing.
+ *
+ * @typeParam Defs - Object mapping error tags to their property types
+ * @param definitions - Object defining error tags and their properties
+ * @returns An object with factory functions for each error type
+ *
+ * @example
+ * ```typescript
+ * // Define errors for a user module using type helpers
+ * const UserErrors = defineErrors({
+ *   NotFound: { userId: t.string },
+ *   InvalidEmail: { email: t.string },
+ *   InvalidAge: { age: t.number, reason: t.string },
+ *   Unauthorized: undefined, // No additional properties
+ * });
+ *
+ * // Or use the old syntax (still supported)
+ * const UserErrors = defineErrors({
+ *   NotFound: { userId: "" as string },
+ *   InvalidEmail: { email: "" as string },
+ *   AlreadyExists: { email: "" as string },
+ *   Unauthorized: undefined,
+ * });
+ *
+ * // Create error instances
+ * const notFound = UserErrors.NotFound({ userId: "123" });
+ * // Type: { _tag: "NotFound", userId: string }
+ *
+ * const invalidEmail = UserErrors.InvalidEmail({ email: "bad" });
+ * // Type: { _tag: "InvalidEmail", email: string }
+ *
+ * const unauthorized = UserErrors.Unauthorized();
+ * // Type: { _tag: "Unauthorized" }
+ *
+ * // Use with Result
+ * function findUser(id: string): Result<User, ErrorsOf<typeof UserErrors>> {
+ *   const user = users.find(u => u.id === id);
+ *   if (!user) {
+ *     return err(UserErrors.NotFound({ userId: id }));
+ *   }
+ *   return ok(user);
+ * }
+ * ```
+ */
+export const defineErrors = <
+  Defs extends Record<string, Record<string, unknown> | undefined>,
+>(
+  definitions: Defs,
+): {
+  [K in keyof Defs]: Defs[K] extends Record<string, unknown>
+    ? (props: Defs[K]) => TaggedError<K & string> & Defs[K]
+    : () => TaggedError<K & string>;
+} => {
+  const result = {} as {
+    [K in keyof Defs]: Defs[K] extends Record<string, unknown>
+      ? (props: Defs[K]) => TaggedError<K & string> & Defs[K]
+      : () => TaggedError<K & string>;
+  };
+
+  for (const tag of Object.keys(definitions)) {
+    result[tag as keyof Defs] = ((props?: Record<string, unknown>) => ({
+      _tag: tag,
+      ...props,
+    })) as {
+      [K in keyof Defs]: Defs[K] extends Record<string, unknown>
+        ? (props: Defs[K]) => TaggedError<K & string> & Defs[K]
+        : () => TaggedError<K & string>;
+    }[keyof Defs];
+  }
+
+  return result;
+};
+
+/**
+ * Infer the error union type from error definitions created by `defineErrors`.
+ *
+ * @typeParam D - The type of the error definitions object
+ * @returns A union of all possible error types
+ *
+ * @example
+ * ```typescript
+ * const ApiErrors = defineErrors({
+ *   NetworkError: { statusCode: 0 as number },
+ *   ParseError: { message: "" as string },
+ *   Timeout: undefined,
+ * });
+ *
+ * type ApiError = ErrorsOf<typeof ApiErrors>;
+ * // Type: (TaggedError<"NetworkError"> & { statusCode: number })
+ * //     | (TaggedError<"ParseError"> & { message: string })
+ * //     | TaggedError<"Timeout">
+ *
+ * // Use in function signatures
+ * function fetchData(): Result<Data, ApiError> {
+ *   // ... implementation
+ * }
+ * ```
+ */
+// deno-lint-ignore no-explicit-any
+export type ErrorsOf<D> = D extends Record<string, (...args: any) => infer E>
+  ? E
+  : never;
