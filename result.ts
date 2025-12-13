@@ -1,11 +1,11 @@
 type OkVariant<T> = {
-	readonly _tag: "Ok";
-	readonly value: T;
+  readonly _tag: "Ok";
+  readonly value: T;
 };
 
 type ErrVariant<E> = {
-	readonly _tag: "Err";
-	readonly error: E;
+  readonly _tag: "Err";
+  readonly error: E;
 };
 
 /**
@@ -63,8 +63,8 @@ export type Result<T, E> = OkVariant<T> | ErrVariant<E>;
  * ```
  */
 export const ok = <T, E = never>(value: T): Result<T, E> => ({
-	_tag: "Ok",
-	value,
+  _tag: "Ok",
+  value,
 });
 
 /**
@@ -96,8 +96,8 @@ export const ok = <T, E = never>(value: T): Result<T, E> => ({
  * ```
  */
 export const err = <E, T = never>(error: E): Result<T, E> => ({
-	_tag: "Err",
-	error,
+  _tag: "Err",
+  error,
 });
 
 /**
@@ -120,7 +120,7 @@ export const err = <E, T = never>(error: E): Result<T, E> => ({
  * ```
  */
 export const isOk = <T, E>(result: Result<T, E>): result is OkVariant<T> =>
-	result._tag === "Ok";
+  result._tag === "Ok";
 
 /**
  * Type guard that checks if a Result is an Err variant.
@@ -142,4 +142,4 @@ export const isOk = <T, E>(result: Result<T, E>): result is OkVariant<T> =>
  * ```
  */
 export const isErr = <T, E>(result: Result<T, E>): result is ErrVariant<E> =>
-	result._tag === "Err";
+  result._tag === "Err";
