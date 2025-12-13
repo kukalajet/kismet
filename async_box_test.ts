@@ -1,6 +1,6 @@
 import { assertEquals, assertStrictEquals } from "@std/assert";
 import { AsyncBox } from "./async_box.ts";
-import type { TaggedError } from "./error.ts";
+import type { TaggedError, UnknownError } from "./error.ts";
 import { isErr, isOk } from "./result.ts";
 
 // =============================================================================
@@ -1245,5 +1245,523 @@ Deno.test("Complex scenarios", async (t) => {
       .unwrapOr("UNKNOWN_ERROR");
 
     assertEquals(result, "HELLO");
+  });
+});
+
+// =============================================================================
+// AsyncBox.wrap() - Wrapping async functions
+// =============================================================================
+
+Deno.test("AsyncBox.wrap()", async (t) => {
+  await t.step(
+    "wraps successful async function with simple overload",
+    async () => {
+      const box = AsyncBox.wrap(() => Promise.resolve(42));
+      const result = await box.unwrapOr(0);
+      assertEquals(result, 42);
+    },
+  );
+
+  await t.step(
+    "catches errors as UnknownError with simple overload",
+    async () => {
+      const box = AsyncBox.wrap(() => Promise.reject(new Error("Failed")));
+
+      const result = await box.match({
+        ok: () => null,
+        err: (e) => e,
+      });
+
+      assertEquals(result?._tag, "UnknownError");
+      assertEquals((result as UnknownError).message, "Failed");
+    },
+  );
+
+  await t.step("preserves original error as cause", async () => {
+    const originalError = new Error("Original error");
+    const box = AsyncBox.wrap(() => Promise.reject(originalError));
+
+    const result = await box.match({
+      ok: () => null,
+      err: (e) => e,
+    });
+
+    assertStrictEquals((result as UnknownError).cause, originalError);
+  });
+
+  await t.step("handles non-Error rejections", async () => {
+    const box = AsyncBox.wrap(() => Promise.reject("string error"));
+
+    const result = await box.match({
+      ok: () => null,
+      err: (e) => e,
+    });
+
+    assertEquals((result as UnknownError).message, "string error");
+    assertEquals((result as UnknownError).cause, "string error");
+  });
+
+  await t.step("wraps with config object for custom error", async () => {
+    type FetchError = TaggedError<"FetchError"> & { url: string };
+
+    const box = AsyncBox.wrap({
+      try: () => Promise.reject(new Error("Network failed")),
+      catch: (_e): FetchError => ({ _tag: "FetchError", url: "/api/data" }),
+    });
+
+    const result = await box.match({
+      ok: () => null,
+      err: (e) => e,
+    });
+
+    assertEquals(result?._tag, "FetchError");
+    assertEquals((result as FetchError).url, "/api/data");
+  });
+
+  await t.step("infers error type from catch handler", async () => {
+    const box = AsyncBox.wrap({
+      try: () => Promise.resolve({ id: 1, name: "Alice" }),
+      catch: (e) => ({
+        _tag: "ParseError" as const,
+        message: e instanceof Error ? e.message : String(e),
+      }),
+    });
+
+    const result = await box.unwrapOr({ id: 0, name: "" });
+    assertEquals(result, { id: 1, name: "Alice" });
+  });
+
+  await t.step("chains with other AsyncBox operations", async () => {
+    const result = await AsyncBox.wrap(() => Promise.resolve(10))
+      .map((x) => x * 2)
+      .flatMap((x) =>
+        AsyncBox.wrap({
+          try: () => Promise.resolve(x + 5),
+          catch: () => ({ _tag: "Error" as const }),
+        })
+      )
+      .unwrapOr(0);
+
+    assertEquals(result, 25);
+  });
+
+  await t.step("works with real async operations", async () => {
+    const box = AsyncBox.wrap(() => delay(10, "delayed value"));
+    const result = await box.unwrapOr("");
+    assertEquals(result, "delayed value");
+  });
+
+  await t.step("properly types the result", async () => {
+    // Simple overload should have UnknownError
+    const simpleBox: AsyncBox<number, UnknownError> = AsyncBox.wrap(
+      () => Promise.resolve(42),
+    );
+    assertEquals(await simpleBox.unwrapOr(0), 42);
+
+    // Config overload should have custom error type
+    type CustomError = TaggedError<"CustomError">;
+    const configBox: AsyncBox<number, CustomError> = AsyncBox.wrap({
+      try: () => Promise.resolve(42),
+      catch: (): CustomError => ({ _tag: "CustomError" }),
+    });
+    assertEquals(await configBox.unwrapOr(0), 42);
+  });
+
+  await t.step("can be caught with catchTag", async () => {
+    const box = AsyncBox.wrap(() => Promise.reject(new Error("Failed")))
+      .catchTag("UnknownError", (e) => AsyncBox.ok(`Recovered: ${e.message}`));
+
+    const result = await box.unwrapOr("");
+    assertEquals(result, "Recovered: Failed");
+  });
+
+  await t.step("works with matchExhaustive for custom errors", async () => {
+    type ApiError =
+      | (TaggedError<"NetworkError"> & { status: number })
+      | TaggedError<"Timeout">;
+
+    const box: AsyncBox<string, ApiError> = AsyncBox.wrap({
+      try: () => Promise.reject({ status: 503 }),
+      catch: (e): ApiError => ({
+        _tag: "NetworkError",
+        status: (e as { status: number }).status ?? 0,
+      }),
+    });
+
+    const result = await box.matchExhaustive({
+      ok: (v) => v,
+      NetworkError: (e) => `Network error: ${e.status}`,
+      Timeout: () => "Timeout",
+    });
+
+    assertEquals(result, "Network error: 503");
+  });
+});
+
+// =============================================================================
+// tap() - Side effects on success (async)
+// =============================================================================
+
+Deno.test("tap() async", async (t) => {
+  await t.step("executes sync callback on success", async () => {
+    let captured: number | null = null;
+
+    const result = await AsyncBox.ok(42)
+      .tap((value) => {
+        captured = value;
+      })
+      .unwrapOr(0);
+
+    assertEquals(captured, 42);
+    assertEquals(result, 42);
+  });
+
+  await t.step("executes async callback on success", async () => {
+    const events: string[] = [];
+
+    const result = await AsyncBox.ok("data")
+      .tap(async (value) => {
+        await delay(5, null);
+        events.push(`processed: ${value}`);
+      })
+      .unwrapOr("");
+
+    assertEquals(events, ["processed: data"]);
+    assertEquals(result, "data");
+  });
+
+  await t.step("does not execute callback on error", async () => {
+    let executed = false;
+
+    await AsyncBox.err<string, number>("error")
+      .tap(() => {
+        executed = true;
+      })
+      .unwrapOr(0);
+
+    assertEquals(executed, false);
+  });
+
+  await t.step("chains with other operations", async () => {
+    const values: number[] = [];
+
+    const result = await AsyncBox.ok(10)
+      .tap((v) => {
+        values.push(v);
+      })
+      .map((x) => x * 2)
+      .tap((v) => {
+        values.push(v);
+      })
+      .map((x) => x + 5)
+      .tap((v) => {
+        values.push(v);
+      })
+      .unwrapOr(0);
+
+    assertEquals(values, [10, 20, 25]);
+    assertEquals(result, 25);
+  });
+
+  await t.step(
+    "waits for async tap to complete before continuing",
+    async () => {
+      const events: string[] = [];
+
+      const result = await AsyncBox.ok(1)
+        .tap(async () => {
+          events.push("tap start");
+          await delay(10, null);
+          events.push("tap end");
+        })
+        .map((x) => {
+          events.push("map");
+          return x * 2;
+        })
+        .unwrapOr(0);
+
+      assertEquals(events, ["tap start", "tap end", "map"]);
+      assertEquals(result, 2);
+    },
+  );
+
+  await t.step("can be used for logging", async () => {
+    const logs: string[] = [];
+
+    await AsyncBox.ok({ id: 1, name: "Alice" })
+      .tap((user) => {
+        logs.push(`Processing user: ${user.name}`);
+      })
+      .map((user) => user.id)
+      .tap((id) => {
+        logs.push(`User ID: ${id}`);
+      })
+      .unwrapOr(0);
+
+    assertEquals(logs, ["Processing user: Alice", "User ID: 1"]);
+  });
+
+  await t.step("preserves error type through tap", async () => {
+    const box: AsyncBox<number, NotFoundError> = AsyncBox.ok(42);
+    const result = await box.tap(() => {}).unwrapOr(0);
+    assertEquals(result, 42);
+  });
+});
+
+// =============================================================================
+// tapErr() - Side effects on error (async)
+// =============================================================================
+
+Deno.test("tapErr() async", async (t) => {
+  await t.step("executes sync callback on error", async () => {
+    let captured: NotFoundError | null = null;
+    const error: NotFoundError = { _tag: "NotFound", id: "123" };
+
+    await AsyncBox.err<NotFoundError, number>(error)
+      .tapErr((e) => {
+        captured = e;
+      })
+      .unwrapOr(0);
+
+    assertEquals(captured, error);
+  });
+
+  await t.step("executes async callback on error", async () => {
+    const events: string[] = [];
+
+    await AsyncBox.fail("NotFound", { id: "123" })
+      .tapErr(async (e) => {
+        await delay(5, null);
+        events.push(`error: ${e._tag}`);
+      })
+      .catchAll(() => AsyncBox.ok("recovered"))
+      .unwrapOr("default");
+
+    assertEquals(events, ["error: NotFound"]);
+  });
+
+  await t.step("does not execute callback on success", async () => {
+    let executed = false;
+
+    await AsyncBox.ok(42)
+      .tapErr(() => {
+        executed = true;
+      })
+      .unwrapOr(0);
+
+    assertEquals(executed, false);
+  });
+
+  await t.step("chains with error recovery", async () => {
+    const errors: string[] = [];
+
+    const result = await AsyncBox.fail("NotFound", { id: "123" })
+      .tapErr((e) => {
+        errors.push(`Error: ${e._tag}`);
+      })
+      .catchTag("NotFound", (e) => {
+        errors.push(`Recovering from ${e.id}`);
+        return AsyncBox.ok("recovered");
+      })
+      .tap((v) => {
+        errors.push(`Result: ${v}`);
+      })
+      .unwrapOr("");
+
+    assertEquals(errors, [
+      "Error: NotFound",
+      "Recovering from 123",
+      "Result: recovered",
+    ]);
+    assertEquals(result, "recovered");
+  });
+
+  await t.step("waits for async tapErr to complete", async () => {
+    const events: string[] = [];
+
+    await AsyncBox.err<string, number>("error")
+      .tapErr(async () => {
+        events.push("tapErr start");
+        await delay(10, null);
+        events.push("tapErr end");
+      })
+      .catchAll(() => {
+        events.push("catchAll");
+        return AsyncBox.ok(0);
+      })
+      .unwrapOr(0);
+
+    assertEquals(events, ["tapErr start", "tapErr end", "catchAll"]);
+  });
+
+  await t.step("can be used for error logging", async () => {
+    const errorLog: string[] = [];
+
+    await AsyncBox.fail("NetworkError", { statusCode: 503, retryable: true })
+      .tapErr((e) => {
+        errorLog.push(`[${e._tag}] Status: ${e.statusCode}`);
+      })
+      .catchAll(() => AsyncBox.ok("fallback"))
+      .unwrapOr("");
+
+    assertEquals(errorLog, ["[NetworkError] Status: 503"]);
+  });
+
+  await t.step("preserves success type through tapErr", async () => {
+    const box: AsyncBox<number, string> = AsyncBox.err("error");
+    const tapped = box.tapErr(() => {});
+
+    const result = await tapped.match({
+      ok: () => "ok",
+      err: () => "err",
+    });
+
+    assertEquals(result, "err");
+  });
+
+  await t.step("works with complex error objects", async () => {
+    let capturedCode: number | null = null;
+    let capturedRetryable: boolean | null = null;
+
+    await AsyncBox.fail("NetworkError", { statusCode: 500, retryable: false })
+      .tapErr((e) => {
+        capturedCode = e.statusCode;
+        capturedRetryable = e.retryable;
+      })
+      .catchAll(() => AsyncBox.ok("fallback"))
+      .unwrapOr("default");
+
+    assertEquals(capturedCode, 500);
+    assertEquals(capturedRetryable, false);
+  });
+});
+
+// =============================================================================
+// tap() and tapErr() - Combined async usage
+// =============================================================================
+
+Deno.test("tap() and tapErr() combined async", async (t) => {
+  await t.step("only tap executes on success", async () => {
+    let tapExecuted = false;
+    let tapErrExecuted = false;
+
+    await AsyncBox.ok(42)
+      .tap(() => {
+        tapExecuted = true;
+      })
+      .tapErr(() => {
+        tapErrExecuted = true;
+      })
+      .unwrapOr(0);
+
+    assertEquals(tapExecuted, true);
+    assertEquals(tapErrExecuted, false);
+  });
+
+  await t.step("only tapErr executes on error", async () => {
+    let tapExecuted = false;
+    let tapErrExecuted = false;
+
+    await AsyncBox.err<string, string>("error")
+      .tap(() => {
+        tapExecuted = true;
+      })
+      .tapErr(() => {
+        tapErrExecuted = true;
+      })
+      .catchAll(() => AsyncBox.ok("recovered"))
+      .unwrapOr("default");
+
+    assertEquals(tapExecuted, false);
+    assertEquals(tapErrExecuted, true);
+  });
+
+  await t.step("debugging async pipeline with both", async () => {
+    const log: string[] = [];
+
+    const pipeline = (input: number) =>
+      AsyncBox.ok(input)
+        .tap((v) => {
+          log.push(`Start: ${v}`);
+        })
+        .flatMap((x) =>
+          x > 0
+            ? AsyncBox.ok(x * 2)
+            : AsyncBox.fail("NegativeNumber", { value: x })
+        )
+        .tap((v) => {
+          log.push(`After double: ${v}`);
+        })
+        .tapErr((e) => {
+          log.push(`Error: ${e._tag}`);
+        })
+        .map((x) => x + 1)
+        .tap((v) => {
+          log.push(`Final: ${v}`);
+        })
+        .catchAll(() => AsyncBox.ok(0));
+
+    // Success path
+    log.length = 0;
+    await pipeline(5).unwrapOr(0);
+    assertEquals(log, ["Start: 5", "After double: 10", "Final: 11"]);
+
+    // Error path
+    log.length = 0;
+    await pipeline(-5).unwrapOr(0);
+    assertEquals(log, ["Start: -5", "Error: NegativeNumber"]);
+  });
+
+  await t.step("real-world async logging scenario", async () => {
+    const activityLog: string[] = [];
+
+    const fetchUser = (id: string) =>
+      AsyncBox.wrap({
+        try: () =>
+          id === "valid"
+            ? delay(5, { id, name: "Alice" })
+            : Promise.reject(new Error("User not found")),
+        catch: () => ({ _tag: "NotFound" as const, userId: id }),
+      });
+
+    // Success case
+    activityLog.length = 0;
+    await fetchUser("valid")
+      .tap((user) => {
+        activityLog.push(`Fetched user: ${user.name}`);
+      })
+      .tapErr((e) => {
+        activityLog.push(`Failed to fetch: ${e.userId}`);
+      })
+      .map((user) => user.name)
+      .tap((name) => {
+        activityLog.push(`Processing: ${name}`);
+      })
+      .unwrapOr("");
+
+    assertEquals(activityLog, [
+      "Fetched user: Alice",
+      "Processing: Alice",
+    ]);
+
+    // Error case
+    activityLog.length = 0;
+    await fetchUser("invalid")
+      .tap((user) => {
+        activityLog.push(`Fetched user: ${user.name}`);
+      })
+      .tapErr((e) => {
+        activityLog.push(`Failed to fetch: ${e.userId}`);
+      })
+      .catchAll(() => AsyncBox.ok("Guest"))
+      .tap((name) => {
+        activityLog.push(`Using fallback: ${name}`);
+      })
+      .unwrapOr("");
+
+    assertEquals(activityLog, [
+      "Failed to fetch: invalid",
+      "Using fallback: Guest",
+    ]);
   });
 });

@@ -14,55 +14,14 @@ A TypeScript/Deno library for type-safe error handling using Rust-inspired `Resu
 ## Installation
 
 ```typescript
-import { Result, ok, err } from "jsr:@kukalajet/kismet";
+import { Box, AsyncBox } from "jsr:@kukalajet/kismet";
 ```
 
 ## Quick Start
 
-### Basic Result Type
-
-```typescript
-import { Result, ok, err, isOk } from "@kukalajet/kismet";
-
-function divide(a: number, b: number): Result<number, string> {
-  if (b === 0) {
-    return err("Division by zero");
-  }
-  return ok(a / b);
-}
-
-const result = divide(10, 2);
-if (isOk(result)) {
-  console.log(result.value); // 5
-} else {
-  console.log(result.error); // error message
-}
-```
-
-### Tagged Errors
-
-```typescript
-import { defineErrors, type ErrorsOf } from "@kukalajet/kismet";
-
-const UserErrors = defineErrors({
-  NotFound: { userId: "" as string },
-  InvalidEmail: { email: "" as string },
-  Unauthorized: undefined, // No additional properties
-});
-
-function findUser(id: string): Result<User, ErrorsOf<typeof UserErrors>> {
-  const user = users.find(u => u.id === id);
-  if (!user) {
-    return err(UserErrors.NotFound({ userId: id }));
-  }
-  if (!user.isActive) {
-    return err(UserErrors.Unauthorized());
-  }
-  return ok(user);
-}
-```
-
 ### Fluent API with Box
+
+`Box` is the primary API for working with Result types. It provides a fluent interface for transforming values and handling errors.
 
 ```typescript
 import { Box } from "@kukalajet/kismet";
@@ -75,9 +34,52 @@ const result = Box.ok(10)
 console.log(result); // 25
 ```
 
+### Creating Errors
+
+```typescript
+import { Box } from "@kukalajet/kismet";
+
+// Create a typed error with properties
+const notFound = Box.fail("NotFound", { userId: "123" });
+// Type: Box<never, TaggedError<"NotFound"> & { userId: string }>
+
+// Create from a throwing function
+const parsed = Box.from(
+  () => JSON.parse(input),
+  (e) => ({ _tag: "ParseError" as const, message: String(e) })
+);
+```
+
+### Tagged Errors with defineErrors
+
+```typescript
+import { Box, defineErrors, type ErrorsOf, t } from "@kukalajet/kismet";
+
+const UserErrors = defineErrors({
+  NotFound: { userId: t.string },
+  InvalidEmail: { email: t.string },
+  Unauthorized: undefined, // No additional properties
+});
+
+type UserError = ErrorsOf<typeof UserErrors>;
+
+function findUser(id: string): Box<User, UserError> {
+  const user = users.find(u => u.id === id);
+  if (!user) {
+    return Box.err(UserErrors.NotFound({ userId: id }));
+  }
+  if (!user.isActive) {
+    return Box.err(UserErrors.Unauthorized());
+  }
+  return Box.ok(user);
+}
+```
+
 ### Error Recovery
 
 ```typescript
+import { Box, type TaggedError } from "@kukalajet/kismet";
+
 type NetworkError = TaggedError<"NetworkError"> & { code: number };
 type ParseError = TaggedError<"ParseError"> & { input: string };
 
@@ -94,17 +96,17 @@ const result = fetchData()
 ### Exhaustive Pattern Matching
 
 ```typescript
-import { matchExhaustive } from "@kukalajet/kismet";
+import { Box, type TaggedError } from "@kukalajet/kismet";
 
 type AppError =
   | (TaggedError<"NotFound"> & { id: string })
   | (TaggedError<"Unauthorized"> & { userId: string })
   | TaggedError<"RateLimited">;
 
-const result = fetchResource("123");
+const result: Box<Resource, AppError> = fetchResource("123");
 
 // TypeScript enforces handling ALL error types
-const message = matchExhaustive(result, {
+const message = result.matchExhaustive({
   ok: (resource) => `Found: ${resource.name}`,
   NotFound: (error) => `Resource ${error.id} not found`,
   Unauthorized: (error) => `User ${error.userId} not authorized`,
@@ -113,7 +115,28 @@ const message = matchExhaustive(result, {
 });
 ```
 
-### Async Operations
+### Side Effects with tap() and tapErr()
+
+Use `tap()` and `tapErr()` for debugging, logging, or other side effects without changing the value:
+
+```typescript
+import { Box } from "@kukalajet/kismet";
+
+const result = Box.ok({ id: 1, name: "Alice" })
+  .tap(user => console.log(`Processing user: ${user.name}`))
+  .map(user => user.id)
+  .tap(id => console.log(`User ID: ${id}`))
+  .unwrapOr(0);
+
+// With error logging
+Box.fail("NetworkError", { statusCode: 503 })
+  .tapErr(e => console.error(`[${e._tag}] Status: ${e.statusCode}`))
+  .catchAll(() => Box.ok("fallback"));
+```
+
+### Async Operations with AsyncBox
+
+`AsyncBox` provides the same fluent API for async operations:
 
 ```typescript
 import { AsyncBox } from "@kukalajet/kismet";
@@ -127,40 +150,51 @@ const result = await AsyncBox.fromPromise(
   .unwrapOr(null);
 ```
 
+### Wrapping Async Functions with AsyncBox.wrap()
+
+`AsyncBox.wrap()` provides an ergonomic way to convert async functions to AsyncBox:
+
+```typescript
+import { AsyncBox } from "@kukalajet/kismet";
+
+// Simple: uses UnknownError for any exceptions
+const result = AsyncBox.wrap(() => fetch("/api/data"));
+// Type: AsyncBox<Response, UnknownError>
+
+// With custom error handling (like Effect.tryPromise)
+const result = AsyncBox.wrap({
+  try: () => fetch("/api/data"),
+  catch: (error) => ({
+    _tag: "FetchError" as const,
+    message: error instanceof Error ? error.message : String(error),
+  }),
+});
+// Type: AsyncBox<Response, { _tag: "FetchError"; message: string }>
+
+// Chain multiple async operations
+const userName = await AsyncBox.wrap(() => fetch("/api/user"))
+  .flatMap(response => AsyncBox.wrap(() => response.json()))
+  .map(user => user.name)
+  .tap(name => console.log(`Fetched: ${name}`))
+  .tapErr(e => console.error(`Failed: ${e.message}`))
+  .unwrapOr("Unknown");
+```
+
+### Async Side Effects
+
+`tap()` and `tapErr()` support async handlers in AsyncBox:
+
+```typescript
+import { AsyncBox } from "@kukalajet/kismet";
+
+await AsyncBox.ok(user)
+  .tap(async (u) => await analytics.track("user_loaded", u.id))
+  .tapErr(async (e) => await logger.error("Failed", e))
+  .map(u => u.name)
+  .unwrapOr("");
+```
+
 ## Core API
-
-### Result Type
-
-```typescript
-type Result<T, E> = 
-  | { _tag: "Ok"; value: T }
-  | { _tag: "Err"; error: E };
-
-// Constructors
-ok<T, E>(value: T): Result<T, E>
-err<E, T>(error: E): Result<T, E>
-
-// Type guards
-isOk<T, E>(result: Result<T, E>): result is OkVariant<T>
-isErr<T, E>(result: Result<T, E>): result is ErrVariant<E>
-```
-
-### Tagged Errors
-
-```typescript
-// Define typed error sets
-defineErrors({
-  ErrorName: { prop1: t.string, prop2: t.number },
-  SimpleError: undefined,
-})
-
-// Type helpers
-t.string, t.number, t.boolean, t.array<T>(), 
-t.optional<T>(), t.nullable<T>(), t.type<T>()
-
-// Error class creation
-makeTaggedError<Tag, Props>(tag)
-```
 
 ### Box API
 
@@ -176,6 +210,10 @@ class Box<T, E> {
   map<U>(fn: (value: T) => U): Box<U, E>
   mapErr<F>(fn: (error: E) => F): Box<T, F>
   flatMap<U, F>(fn: (value: T) => Box<U, F>): Box<U, E | F>
+
+  // Side effects
+  tap(fn: (value: T) => void): Box<T, E>
+  tapErr(fn: (error: E) => void): Box<T, E>
 
   // Error handling
   catchTag<Tag>(tag: Tag, handler: (e) => Box<T, F>): Box<T, RemainingErrors | F>
@@ -203,14 +241,56 @@ Same methods as `Box` but returns `AsyncBox<T, E>` or `Promise<T>`:
 
 ```typescript
 class AsyncBox<T, E> {
-  // Additional constructor
+  // Constructors
+  static ok<T>(value: T): AsyncBox<T, never>
+  static err<E>(error: E): AsyncBox<never, E>
+  static fail<Tag>(tag: Tag, props?: Props): AsyncBox<never, TaggedError<Tag>>
   static fromPromise<T, E>(promise: Promise<T>, onError: (e) => E): AsyncBox<T, E>
   
-  // All Box methods (async versions)
-  map, flatMap, catchTag, match, unwrapOr, etc.
+  // Wrapping async functions
+  static wrap<T>(fn: () => Promise<T>): AsyncBox<T, UnknownError>
+  static wrap<T, E>(config: { try: () => Promise<T>; catch: (e) => E }): AsyncBox<T, E>
   
-  // Execute the async chain
+  // Transformations (same as Box)
+  map, mapErr, flatMap
+  
+  // Side effects (support async handlers)
+  tap(fn: (value: T) => void | Promise<void>): AsyncBox<T, E>
+  tapErr(fn: (error: E) => void | Promise<void>): AsyncBox<T, E>
+  
+  // Error handling (same as Box)
+  catchTag, catchAll
+  
+  // Pattern matching (async)
+  match<R>(config): Promise<R>
+  matchExhaustive<R>(config): Promise<R>
+  
+  // Extraction
+  unwrapOr(defaultValue: T): Promise<T>
   run(): Promise<Result<T, E>>
+}
+```
+
+### Tagged Errors
+
+```typescript
+// Define typed error sets
+defineErrors({
+  ErrorName: { prop1: t.string, prop2: t.number },
+  SimpleError: undefined,
+})
+
+// Type helpers
+t.string, t.number, t.boolean, t.array<T>(), 
+t.optional<T>(), t.nullable<T>(), t.type<T>()
+
+// Error class creation (for instanceof checks)
+makeTaggedError<Tag, Props>(tag)
+
+// Standard error for unknown exceptions
+type UnknownError = TaggedError<"UnknownError"> & {
+  cause: unknown;
+  message: string;
 }
 ```
 

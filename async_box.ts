@@ -1,6 +1,25 @@
-import type { AllTags, ErrorByTag, TaggedError } from "./error.ts";
+import {
+  type AllTags,
+  type ErrorByTag,
+  type TaggedError,
+  type UnknownError,
+  unknownError,
+} from "./error.ts";
 import { type MatchConfig, matchExhaustive } from "./matcher.ts";
 import { err, isErr, isOk, ok, type Result } from "./result.ts";
+
+/**
+ * Configuration for `AsyncBox.wrap()` with custom error handling.
+ *
+ * @typeParam T - The success type of the async operation
+ * @typeParam E - The error type returned by the catch handler
+ */
+type WrapConfig<T, E> = {
+  /** The async function to execute */
+  try: () => Promise<T>;
+  /** Handler to convert unknown errors to a typed error */
+  catch: (error: unknown) => E;
+};
 
 /**
  * Async version of ResultBox for handling Promise-based operations.
@@ -134,6 +153,50 @@ export class AsyncBox<T, E> {
   }
 
   /**
+   * Wrap an async function, converting exceptions to typed errors.
+   *
+   * **Simple overload:** Pass a function directly to get `UnknownError` on failure.
+   *
+   * **Config overload:** Pass `{ try, catch }` for custom error handling with
+   * full type inference.
+   *
+   * @example
+   * ```typescript
+   * // Simple: uses UnknownError for any exceptions
+   * const result = AsyncBox.wrap(() => fetch("/api/data"));
+   * // Type: AsyncBox<Response, UnknownError>
+   *
+   * // Config: custom error type with full inference
+   * const result = AsyncBox.wrap({
+   *   try: () => fetch("/api/data"),
+   *   catch: (error) => ({
+   *     _tag: "FetchError" as const,
+   *     message: error instanceof Error ? error.message : String(error),
+   *   }),
+   * });
+   * // Type: AsyncBox<Response, { _tag: "FetchError"; message: string }>
+   *
+   * // Chain with other operations
+   * const userName = await AsyncBox.wrap(() => fetch("/api/user"))
+   *   .flatMap(response => AsyncBox.wrap(() => response.json()))
+   *   .map(user => user.name)
+   *   .unwrapOr("Unknown");
+   * ```
+   */
+  static wrap<T>(fn: () => Promise<T>): AsyncBox<T, UnknownError>;
+  static wrap<T, E extends TaggedError>(
+    config: WrapConfig<T, E>,
+  ): AsyncBox<T, E>;
+  static wrap<T, E extends TaggedError>(
+    fnOrConfig: (() => Promise<T>) | WrapConfig<T, E>,
+  ): AsyncBox<T, UnknownError | E> {
+    if (typeof fnOrConfig === "function") {
+      return AsyncBox.fromPromise(fnOrConfig(), unknownError);
+    }
+    return AsyncBox.fromPromise(fnOrConfig.try(), fnOrConfig.catch);
+  }
+
+  /**
    * Transform the success value using the provided function.
    *
    * @typeParam U - The type of the transformed value
@@ -171,6 +234,74 @@ export class AsyncBox<T, E> {
   mapErr<F>(fn: (error: E) => F): AsyncBox<T, F> {
     return new AsyncBox(
       this.promise.then((r) => (isErr(r) ? err(fn(r.error)) : r)),
+    );
+  }
+
+  /**
+   * Execute a side effect on the success value without changing it.
+   * If this is an Err, the function is not called.
+   * The handler can be sync or async.
+   *
+   * @param fn - Function to execute with the success value
+   * @returns The same AsyncBox unchanged
+   *
+   * @example
+   * ```typescript
+   * const result = await AsyncBox.ok(42)
+   *   .tap(value => console.log(`Got value: ${value}`))
+   *   .map(x => x * 2)
+   *   .unwrapOr(0);
+   * // Logs: "Got value: 42"
+   * // result is 84
+   *
+   * // Async side effects
+   * await AsyncBox.ok(user)
+   *   .tap(async (u) => await analytics.track("user_loaded", u.id))
+   *   .map(u => u.name);
+   * ```
+   */
+  tap(fn: (value: T) => void | Promise<void>): AsyncBox<T, E> {
+    return new AsyncBox(
+      this.promise.then(async (r) => {
+        if (isOk(r)) {
+          await fn(r.value);
+        }
+        return r;
+      }),
+    );
+  }
+
+  /**
+   * Execute a side effect on the error without changing it.
+   * If this is Ok, the function is not called.
+   * The handler can be sync or async.
+   *
+   * @param fn - Function to execute with the error value
+   * @returns The same AsyncBox unchanged
+   *
+   * @example
+   * ```typescript
+   * const result = await AsyncBox.err({ code: 404 })
+   *   .tapErr(error => console.error(`Error: ${error.code}`))
+   *   .catchAll(() => AsyncBox.ok("default"))
+   *   .unwrapOr("fallback");
+   * // Logs: "Error: 404"
+   * // result is "default"
+   *
+   * // Async error logging
+   * await fetchUser(id)
+   *   .tapErr(async (error) => await logger.error("Fetch failed", error))
+   *   .unwrapOr(null);
+   * ```
+   */
+  tapErr(fn: (error: E) => void | Promise<void>): AsyncBox<T, E> {
+    return new AsyncBox(
+      this.promise.then(async (r) => {
+        if (isErr(r)) {
+          await fn(r.error);
+        }
+        return r;
+      }),
     );
   }
 

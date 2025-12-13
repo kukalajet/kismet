@@ -342,3 +342,50 @@ export type ErrorByTag<E, Tag extends string> = Extract<E, { _tag: Tag }>;
  * ```
  */
 export type ExcludeByTag<E, Tag extends string> = Exclude<E, { _tag: Tag }>;
+
+/**
+ * A standard error type for wrapping unknown errors.
+ * Used by `AsyncBox.wrap()` when no custom error handler is provided.
+ *
+ * @example
+ * ```typescript
+ * // AsyncBox.wrap with simple function creates UnknownError on failure
+ * const result = AsyncBox.wrap(() => fetch("/api/data"));
+ * // Type: AsyncBox<Response, UnknownError>
+ *
+ * // Access error details
+ * result.tapErr((error) => {
+ *   console.log(error._tag);    // "UnknownError"
+ *   console.log(error.message); // Error message
+ *   console.log(error.cause);   // Original error
+ * });
+ * ```
+ */
+export type UnknownError = TaggedError<"UnknownError"> & {
+  readonly cause: unknown;
+  readonly message: string;
+};
+
+/**
+ * Create an UnknownError from an unknown value.
+ * Extracts the message if the value is an Error instance.
+ *
+ * @param cause - The unknown error value to wrap
+ * @returns An UnknownError with the cause and extracted message
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   throw new Error("Something went wrong");
+ * } catch (e) {
+ *   const error = unknownError(e);
+ *   console.log(error._tag);    // "UnknownError"
+ *   console.log(error.message); // "Something went wrong"
+ * }
+ * ```
+ */
+export const unknownError = (cause: unknown): UnknownError => ({
+  _tag: "UnknownError",
+  cause,
+  message: cause instanceof Error ? cause.message : String(cause),
+});

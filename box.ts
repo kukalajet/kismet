@@ -245,6 +245,62 @@ export class Box<T, E> {
   }
 
   /**
+   * Execute a side effect on the success value without changing it.
+   * If this is an Err, the function is not called.
+   * Returns the same Box unchanged.
+   *
+   * @param fn - Function to execute with the success value
+   * @returns The same Box unchanged
+   *
+   * @example
+   * ```typescript
+   * const result = Box.ok(42)
+   *   .tap(value => console.log(`Got value: ${value}`))
+   *   .map(x => x * 2);
+   * // Logs: "Got value: 42"
+   * // result contains 84
+   *
+   * // Errors skip the tap
+   * Box.err("failed")
+   *   .tap(value => console.log("This won't run"));
+   * ```
+   */
+  tap(fn: (value: T) => void): Box<T, E> {
+    if (isOk(this.result)) {
+      fn(this.result.value);
+    }
+    return this;
+  }
+
+  /**
+   * Execute a side effect on the error without changing it.
+   * If this is Ok, the function is not called.
+   * Returns the same Box unchanged.
+   *
+   * @param fn - Function to execute with the error value
+   * @returns The same Box unchanged
+   *
+   * @example
+   * ```typescript
+   * const result = Box.err({ code: 404, message: "Not found" })
+   *   .tapErr(error => console.error(`Error ${error.code}: ${error.message}`))
+   *   .catchAll(() => Box.ok("default"));
+   * // Logs: "Error 404: Not found"
+   * // result contains "default"
+   *
+   * // Success values skip the tapErr
+   * Box.ok(42)
+   *   .tapErr(error => console.log("This won't run"));
+   * ```
+   */
+  tapErr(fn: (error: E) => void): Box<T, E> {
+    if (isErr(this.result)) {
+      fn(this.result.error);
+    }
+    return this;
+  }
+
+  /**
    * Chain operations that return Box. Error types accumulate in the union.
    * If this is an Err, the function is not called and the error is propagated.
    *

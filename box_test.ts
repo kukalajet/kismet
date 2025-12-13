@@ -1130,3 +1130,220 @@ Deno.test("Complex scenarios", async (t) => {
     assertEquals(result.comments.length, 1);
   });
 });
+
+// =============================================================================
+// tap() - Side effects on success
+// =============================================================================
+
+Deno.test("tap()", async (t) => {
+  await t.step("executes callback on success", () => {
+    let captured: number | null = null;
+    const box = Box.ok(42).tap((value) => {
+      captured = value;
+    });
+
+    assertEquals(captured, 42);
+    assertEquals(box.unwrapOr(0), 42);
+  });
+
+  await t.step("does not execute callback on error", () => {
+    let executed = false;
+    const box = Box.err<string, number>("error").tap(() => {
+      executed = true;
+    });
+
+    assertEquals(executed, false);
+    assertEquals(box.isErr(), true);
+  });
+
+  await t.step("returns the same Box", () => {
+    const original = Box.ok(42);
+    const tapped = original.tap(() => {});
+
+    assertStrictEquals(original, tapped);
+  });
+
+  await t.step("chains with other operations", () => {
+    const values: number[] = [];
+
+    const result = Box.ok(10)
+      .tap((v) => values.push(v))
+      .map((x) => x * 2)
+      .tap((v) => values.push(v))
+      .map((x) => x + 5)
+      .tap((v) => values.push(v))
+      .unwrapOr(0);
+
+    assertEquals(values, [10, 20, 25]);
+    assertEquals(result, 25);
+  });
+
+  await t.step("can be used for logging", () => {
+    const logs: string[] = [];
+
+    Box.ok({ id: 1, name: "Alice" })
+      .tap((user) => logs.push(`Processing user: ${user.name}`))
+      .map((user) => user.id)
+      .tap((id) => logs.push(`User ID: ${id}`));
+
+    assertEquals(logs, ["Processing user: Alice", "User ID: 1"]);
+  });
+
+  await t.step("preserves error type", () => {
+    const box: Box<number, NotFoundError> = Box.ok(42);
+    const tapped = box.tap(() => {});
+
+    // Type should still be Box<number, NotFoundError>
+    assertEquals(tapped.unwrapOr(0), 42);
+  });
+});
+
+// =============================================================================
+// tapErr() - Side effects on error
+// =============================================================================
+
+Deno.test("tapErr()", async (t) => {
+  await t.step("executes callback on error", () => {
+    let captured: NotFoundError | null = null;
+    const error: NotFoundError = { _tag: "NotFound", id: "123" };
+
+    Box.err<NotFoundError, number>(error).tapErr((e) => {
+      captured = e;
+    });
+
+    assertEquals(captured, error);
+  });
+
+  await t.step("does not execute callback on success", () => {
+    let executed = false;
+    const box = Box.ok(42).tapErr(() => {
+      executed = true;
+    });
+
+    assertEquals(executed, false);
+    assertEquals(box.unwrapOr(0), 42);
+  });
+
+  await t.step("returns the same Box", () => {
+    const original = Box.err<string, number>("error");
+    const tapped = original.tapErr(() => {});
+
+    assertStrictEquals(original, tapped);
+  });
+
+  await t.step("chains with error recovery", () => {
+    const errors: string[] = [];
+
+    const result = Box.fail("NotFound", { id: "123" })
+      .tapErr((e) => errors.push(`Error: ${e._tag}`))
+      .catchTag("NotFound", (e) => {
+        errors.push(`Recovering from ${e.id}`);
+        return Box.ok("recovered");
+      })
+      .tap((v) => errors.push(`Result: ${v}`))
+      .unwrapOr("");
+
+    assertEquals(errors, [
+      "Error: NotFound",
+      "Recovering from 123",
+      "Result: recovered",
+    ]);
+    assertEquals(result, "recovered");
+  });
+
+  await t.step("can be used for error logging", () => {
+    const errorLog: string[] = [];
+
+    Box.fail("NetworkError", { statusCode: 503, retryable: true })
+      .tapErr((e) => errorLog.push(`[${e._tag}] Status: ${e.statusCode}`))
+      .catchAll(() => Box.ok("fallback"));
+
+    assertEquals(errorLog, ["[NetworkError] Status: 503"]);
+  });
+
+  await t.step("preserves success type", () => {
+    const box: Box<number, string> = Box.err("error");
+    const tapped = box.tapErr(() => {});
+
+    // Type should still be Box<number, string>
+    assertEquals(tapped.isErr(), true);
+  });
+
+  await t.step("works with complex error objects", () => {
+    let capturedCode: number | null = null;
+    let capturedRetryable: boolean | null = null;
+
+    Box.fail("NetworkError", { statusCode: 500, retryable: false }).tapErr(
+      (e) => {
+        capturedCode = e.statusCode;
+        capturedRetryable = e.retryable;
+      },
+    );
+
+    assertEquals(capturedCode, 500);
+    assertEquals(capturedRetryable, false);
+  });
+});
+
+// =============================================================================
+// tap() and tapErr() - Combined usage
+// =============================================================================
+
+Deno.test("tap() and tapErr() combined", async (t) => {
+  await t.step("only tap executes on success", () => {
+    let tapExecuted = false;
+    let tapErrExecuted = false;
+
+    Box.ok(42)
+      .tap(() => {
+        tapExecuted = true;
+      })
+      .tapErr(() => {
+        tapErrExecuted = true;
+      });
+
+    assertEquals(tapExecuted, true);
+    assertEquals(tapErrExecuted, false);
+  });
+
+  await t.step("only tapErr executes on error", () => {
+    let tapExecuted = false;
+    let tapErrExecuted = false;
+
+    Box.err("error")
+      .tap(() => {
+        tapExecuted = true;
+      })
+      .tapErr(() => {
+        tapErrExecuted = true;
+      });
+
+    assertEquals(tapExecuted, false);
+    assertEquals(tapErrExecuted, true);
+  });
+
+  await t.step("debugging pipeline with both", () => {
+    const log: string[] = [];
+
+    const pipeline = (input: number) =>
+      Box.ok(input)
+        .tap((v) => log.push(`Start: ${v}`))
+        .flatMap((x) =>
+          x > 0 ? Box.ok(x * 2) : Box.fail("NegativeNumber", { value: x })
+        )
+        .tap((v) => log.push(`After double: ${v}`))
+        .tapErr((e) => log.push(`Error: ${e._tag}`))
+        .map((x) => x + 1)
+        .tap((v) => log.push(`Final: ${v}`));
+
+    // Success path
+    log.length = 0;
+    pipeline(5);
+    assertEquals(log, ["Start: 5", "After double: 10", "Final: 11"]);
+
+    // Error path
+    log.length = 0;
+    pipeline(-5);
+    assertEquals(log, ["Start: -5", "Error: NegativeNumber"]);
+  });
+});
