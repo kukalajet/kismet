@@ -115,7 +115,7 @@ async function simulateFetch(
 
 // 2. Generic fetch with JSON parsing and error mapping
 function fetchJson<T>(url: string): AsyncBox<T, ApiError> {
-  return AsyncBox.fromPromise(
+  return AsyncBox.fromPromise<Response, ApiError>(
     simulateFetch(url),
     (_e) =>
       ApiErrors.NetworkError({
@@ -125,7 +125,7 @@ function fetchJson<T>(url: string): AsyncBox<T, ApiError> {
       }),
   )
     .tap((response) => console.log(`  → GET ${url} (${response.status})`))
-    .flatMap((response) => {
+    .flatMap((response): AsyncBox<Response, ApiError> => {
       // Map HTTP status to typed errors
       if (response.status === 404) {
         return AsyncBox.err(ApiErrors.NotFound({
@@ -153,7 +153,7 @@ function fetchJson<T>(url: string): AsyncBox<T, ApiError> {
 
       return AsyncBox.ok(response);
     })
-    .flatMap((response) =>
+    .flatMap((response: Response) =>
       AsyncBox.wrap({
         try: () => response.json() as Promise<T>,
         catch: (e) =>
@@ -162,7 +162,7 @@ function fetchJson<T>(url: string): AsyncBox<T, ApiError> {
           }),
       })
     )
-    .tapErr((e) => console.log(`  ✗ Error: ${e._tag}`));
+    .tapErr((e: ApiError) => console.log(`  ✗ Error: ${e._tag}`));
 }
 
 // 3. Get user by ID

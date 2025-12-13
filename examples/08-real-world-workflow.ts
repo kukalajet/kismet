@@ -194,7 +194,10 @@ function validateCart(
 function checkInventory(
   items: CartItem[],
 ): AsyncBox<CartItem[], ReturnType<typeof CheckoutErrors.OutOfStock>> {
-  return AsyncBox.wrap({
+  return AsyncBox.wrap<
+    CartItem[],
+    ReturnType<typeof CheckoutErrors.OutOfStock>
+  >({
     try: async () => {
       await delay(50);
       const check = inventory.checkAvailability(items);
@@ -211,8 +214,10 @@ function checkInventory(
 
       return items;
     },
-    catch: (e: { productId: string; requested: number; available: number }) =>
-      CheckoutErrors.OutOfStock(e),
+    catch: (e: unknown) =>
+      CheckoutErrors.OutOfStock(
+        e as { productId: string; requested: number; available: number },
+      ),
   });
 }
 

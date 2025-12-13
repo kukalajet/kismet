@@ -208,12 +208,12 @@ function fallbackChain<T>(
 }
 
 // 4. Timeout wrapper
-function withTimeout<T, E>(
+function withTimeout<T, E extends { _tag: string }>(
   fn: () => AsyncBox<T, E>,
   timeoutMs: number,
   operation: string,
 ): AsyncBox<T, E | ReturnType<typeof ResilienceErrors.Timeout>> {
-  return AsyncBox.wrap({
+  return AsyncBox.wrap<T, E | ReturnType<typeof ResilienceErrors.Timeout>>({
     try: async () => {
       const timeoutPromise = delay(timeoutMs).then(() => {
         throw new Error("Timeout");
@@ -232,7 +232,7 @@ function withTimeout<T, E>(
 
       throw new Error("Unexpected result");
     },
-    catch: (e) => {
+    catch: (e): E | ReturnType<typeof ResilienceErrors.Timeout> => {
       if (e instanceof Error && e.message === "Timeout") {
         return ResilienceErrors.Timeout({ operation, duration: timeoutMs });
       }

@@ -321,9 +321,7 @@ async function main() {
       ok: (user) => `✓ Inserted: ${user.name}`,
       ConnectionError: (e) => `✗ Connection failed: ${e.host}:${e.port}`,
       QueryError: (e) => `✗ Query error: ${e.code}`,
-      NotFound: (e) => `✗ Not found: ${e.table} ${e.id}`,
       DuplicateKey: (e) => `✗ Duplicate ${e.key} "${e.value}" in ${e.table}`,
-      TransactionFailed: (e) => `✗ Transaction failed: ${e.reason}`,
       Timeout: (e) => `✗ Timeout: ${e.query}`,
     });
   console.log(result2);
