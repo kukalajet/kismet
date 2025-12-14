@@ -277,8 +277,8 @@ export type ErrorsOf<D> = D extends Record<string, (...args: any) => infer E>
  * }
  * ```
  */
-// deno-lint-ignore no-explicit-any
 export type ErrorType<D, K extends keyof D> = ReturnType<
+  // deno-lint-ignore no-explicit-any
   D[K] extends (...args: any) => any ? D[K] : never
 >;
 
