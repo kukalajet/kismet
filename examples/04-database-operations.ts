@@ -11,7 +11,13 @@
  * Run: deno run examples/04-database-operations.ts
  */
 
-import { AsyncBox, defineErrors, type ErrorsOf, t } from "../mod.ts";
+import {
+  AsyncBox,
+  defineErrors,
+  type ErrorsOf,
+  type ErrorType,
+  t,
+} from "../mod.ts";
 
 // Define database errors
 const DbErrors = defineErrors({
@@ -98,7 +104,7 @@ function delay(ms: number): Promise<void> {
 // 1. Connect to database
 function connect(): AsyncBox<
   DbConnection,
-  ReturnType<typeof DbErrors.ConnectionError>
+  ErrorType<typeof DbErrors, "ConnectionError">
 > {
   return AsyncBox.wrap({
     try: async () => {
@@ -125,7 +131,8 @@ function query<T>(
   executor: () => T,
 ): AsyncBox<
   T,
-  ReturnType<typeof DbErrors.QueryError> | ReturnType<typeof DbErrors.Timeout>
+  | ErrorType<typeof DbErrors, "QueryError">
+  | ErrorType<typeof DbErrors, "Timeout">
 > {
   return AsyncBox.wrap({
     try: async () => {
@@ -156,9 +163,9 @@ function findById(
   id: string,
 ): AsyncBox<
   User,
-  | ReturnType<typeof DbErrors.NotFound>
-  | ReturnType<typeof DbErrors.QueryError>
-  | ReturnType<typeof DbErrors.Timeout>
+  | ErrorType<typeof DbErrors, "NotFound">
+  | ErrorType<typeof DbErrors, "QueryError">
+  | ErrorType<typeof DbErrors, "Timeout">
 > {
   const sql = `SELECT * FROM users WHERE id = '${id}'`;
 
@@ -183,9 +190,9 @@ function insert(
   user: User,
 ): AsyncBox<
   User,
-  | ReturnType<typeof DbErrors.DuplicateKey>
-  | ReturnType<typeof DbErrors.QueryError>
-  | ReturnType<typeof DbErrors.Timeout>
+  | ErrorType<typeof DbErrors, "DuplicateKey">
+  | ErrorType<typeof DbErrors, "QueryError">
+  | ErrorType<typeof DbErrors, "Timeout">
 > {
   const sql =
     `INSERT INTO users VALUES ('${user.id}', '${user.name}', '${user.email}')`;
@@ -213,9 +220,9 @@ function _update(
   data: Partial<User>,
 ): AsyncBox<
   User,
-  | ReturnType<typeof DbErrors.NotFound>
-  | ReturnType<typeof DbErrors.QueryError>
-  | ReturnType<typeof DbErrors.Timeout>
+  | ErrorType<typeof DbErrors, "NotFound">
+  | ErrorType<typeof DbErrors, "QueryError">
+  | ErrorType<typeof DbErrors, "Timeout">
 > {
   const sql = `UPDATE users SET ... WHERE id = '${id}'`;
 

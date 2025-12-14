@@ -8,6 +8,7 @@ export type {
   ErrorByTag,
   ErrorOf,
   ErrorsOf,
+  ErrorType,
   ExcludeByTag,
   SuccessOf,
   TaggedError,

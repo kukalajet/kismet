@@ -11,7 +11,13 @@
  * Run: deno run examples/03-validation-pipeline.ts
  */
 
-import { AsyncBox, defineErrors, type ErrorsOf, t } from "../mod.ts";
+import {
+  AsyncBox,
+  defineErrors,
+  type ErrorsOf,
+  type ErrorType,
+  t,
+} from "../mod.ts";
 
 // Define validation errors
 const ValidationErrors = defineErrors({
@@ -46,7 +52,7 @@ function delay(ms: number): Promise<void> {
 // 1. Validate email format (sync validation wrapped in AsyncBox)
 function validateEmail(
   email: string,
-): AsyncBox<string, ReturnType<typeof ValidationErrors.InvalidEmail>> {
+): AsyncBox<string, ErrorType<typeof ValidationErrors, "InvalidEmail">> {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
   if (!email) {
@@ -69,7 +75,7 @@ function validateEmail(
 // 2. Check email uniqueness (async database check)
 function checkEmailUnique(
   email: string,
-): AsyncBox<string, ReturnType<typeof ValidationErrors.EmailTaken>> {
+): AsyncBox<string, ErrorType<typeof ValidationErrors, "EmailTaken">> {
   return AsyncBox.wrap({
     try: async () => {
       await delay(30); // Simulate database query
@@ -85,7 +91,7 @@ function checkEmailUnique(
 // 3. Validate age range
 function validateAge(
   age: number,
-): AsyncBox<number, ReturnType<typeof ValidationErrors.InvalidAge>> {
+): AsyncBox<number, ErrorType<typeof ValidationErrors, "InvalidAge">> {
   const MIN_AGE = 13;
   const MAX_AGE = 120;
 
@@ -103,7 +109,7 @@ function validateAge(
 // 4. Validate username (multiple rules)
 function validateUsername(
   username: string,
-): AsyncBox<string, ReturnType<typeof ValidationErrors.UsernameInvalid>> {
+): AsyncBox<string, ErrorType<typeof ValidationErrors, "UsernameInvalid">> {
   const failedRules: string[] = [];
 
   if (username.length < 3) {

@@ -11,7 +11,13 @@
  * Run: deno run examples/06-retry-and-fallback.ts
  */
 
-import { AsyncBox, defineErrors, type ErrorsOf, t } from "../mod.ts";
+import {
+  AsyncBox,
+  defineErrors,
+  type ErrorsOf,
+  type ErrorType,
+  t,
+} from "../mod.ts";
 
 // Define resilience errors
 const ResilienceErrors = defineErrors({
@@ -44,7 +50,9 @@ class CircuitBreaker {
   async execute<T, E>(
     fn: () => AsyncBox<T, E>,
     serviceName: string,
-  ): Promise<AsyncBox<T, E | ReturnType<typeof ResilienceErrors.CircuitOpen>>> {
+  ): Promise<
+    AsyncBox<T, E | ErrorType<typeof ResilienceErrors, "CircuitOpen">>
+  > {
     // Check if circuit should reset to half-open
     if (
       this.state === "open" &&
@@ -99,11 +107,11 @@ class CircuitBreaker {
 function withExponentialBackoff<T, E>(
   fn: () => AsyncBox<T, E>,
   config: { maxAttempts: number; initialDelay: number; maxDelay: number },
-): AsyncBox<T, E | ReturnType<typeof ResilienceErrors.AllRetriesFailed>> {
+): AsyncBox<T, E | ErrorType<typeof ResilienceErrors, "AllRetriesFailed">> {
   async function attempt(
     attemptNum: number,
   ): Promise<
-    AsyncBox<T, E | ReturnType<typeof ResilienceErrors.AllRetriesFailed>>
+    AsyncBox<T, E | ErrorType<typeof ResilienceErrors, "AllRetriesFailed">>
   > {
     const result = await fn().run();
 
@@ -134,7 +142,7 @@ function withExponentialBackoff<T, E>(
 
   return AsyncBox.fromPromise(
     attempt(1).then((box) => box.run()),
-    (e) => e as E | ReturnType<typeof ResilienceErrors.AllRetriesFailed>,
+    (e) => e as E | ErrorType<typeof ResilienceErrors, "AllRetriesFailed">,
   ).flatMap((result) =>
     result._tag === "Ok"
       ? AsyncBox.ok(result.value)
@@ -146,7 +154,7 @@ function withExponentialBackoff<T, E>(
 let callCount = 0;
 function unreliableService(): AsyncBox<
   string,
-  ReturnType<typeof ResilienceErrors.TransientError>
+  ErrorType<typeof ResilienceErrors, "TransientError">
 > {
   callCount++;
   const willSucceed = callCount >= 3; // Succeeds on 3rd attempt
@@ -170,10 +178,12 @@ function unreliableService(): AsyncBox<
 // 3. Fallback chain - try multiple sources
 function fallbackChain<T>(
   operations: Array<{ name: string; fn: () => AsyncBox<T, ResilienceError> }>,
-): AsyncBox<T, ReturnType<typeof ResilienceErrors.FallbackFailed>> {
+): AsyncBox<T, ErrorType<typeof ResilienceErrors, "FallbackFailed">> {
   async function tryNext(
     index: number,
-  ): Promise<AsyncBox<T, ReturnType<typeof ResilienceErrors.FallbackFailed>>> {
+  ): Promise<
+    AsyncBox<T, ErrorType<typeof ResilienceErrors, "FallbackFailed">>
+  > {
     if (index >= operations.length) {
       return AsyncBox.err(ResilienceErrors.FallbackFailed({
         primary: operations[0].name,
@@ -199,7 +209,7 @@ function fallbackChain<T>(
 
   return AsyncBox.fromPromise(
     tryNext(0).then((box) => box.run()),
-    (e) => e as ReturnType<typeof ResilienceErrors.FallbackFailed>,
+    (e) => e as ErrorType<typeof ResilienceErrors, "FallbackFailed">,
   ).flatMap((result) =>
     result._tag === "Ok"
       ? AsyncBox.ok(result.value)
@@ -212,8 +222,8 @@ function withTimeout<T, E extends { _tag: string }>(
   fn: () => AsyncBox<T, E>,
   timeoutMs: number,
   operation: string,
-): AsyncBox<T, E | ReturnType<typeof ResilienceErrors.Timeout>> {
-  return AsyncBox.wrap<T, E | ReturnType<typeof ResilienceErrors.Timeout>>({
+): AsyncBox<T, E | ErrorType<typeof ResilienceErrors, "Timeout">> {
+  return AsyncBox.wrap<T, E | ErrorType<typeof ResilienceErrors, "Timeout">>({
     try: async () => {
       const timeoutPromise = delay(timeoutMs).then(() => {
         throw new Error("Timeout");
@@ -232,7 +242,7 @@ function withTimeout<T, E extends { _tag: string }>(
 
       throw new Error("Unexpected result");
     },
-    catch: (e): E | ReturnType<typeof ResilienceErrors.Timeout> => {
+    catch: (e): E | ErrorType<typeof ResilienceErrors, "Timeout"> => {
       if (e instanceof Error && e.message === "Timeout") {
         return ResilienceErrors.Timeout({ operation, duration: timeoutMs });
       }

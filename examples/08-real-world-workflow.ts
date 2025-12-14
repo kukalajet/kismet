@@ -12,7 +12,13 @@
  * Run: deno run examples/08-real-world-workflow.ts
  */
 
-import { AsyncBox, defineErrors, type ErrorsOf, t } from "../mod.ts";
+import {
+  AsyncBox,
+  defineErrors,
+  type ErrorsOf,
+  type ErrorType,
+  t,
+} from "../mod.ts";
 
 // Define checkout errors
 const CheckoutErrors = defineErrors({
@@ -170,7 +176,7 @@ function delay(ms: number): Promise<void> {
 // 1. Validate cart
 function validateCart(
   cart: Cart,
-): AsyncBox<Cart, ReturnType<typeof CheckoutErrors.InvalidCart>> {
+): AsyncBox<Cart, ErrorType<typeof CheckoutErrors, "InvalidCart">> {
   if (cart.items.length === 0) {
     return AsyncBox.err(CheckoutErrors.InvalidCart({
       reason: "Cart is empty",
@@ -193,10 +199,10 @@ function validateCart(
 // 2. Check inventory availability
 function checkInventory(
   items: CartItem[],
-): AsyncBox<CartItem[], ReturnType<typeof CheckoutErrors.OutOfStock>> {
+): AsyncBox<CartItem[], ErrorType<typeof CheckoutErrors, "OutOfStock">> {
   return AsyncBox.wrap<
     CartItem[],
-    ReturnType<typeof CheckoutErrors.OutOfStock>
+    ErrorType<typeof CheckoutErrors, "OutOfStock">
   >({
     try: async () => {
       await delay(50);
@@ -226,7 +232,7 @@ function reserveInventory(
   items: CartItem[],
 ): AsyncBox<
   InventoryReservation,
-  ReturnType<typeof CheckoutErrors.InventoryLockFailed>
+  ErrorType<typeof CheckoutErrors, "InventoryLockFailed">
 > {
   return AsyncBox.wrap({
     try: async () => {
@@ -246,8 +252,8 @@ function processPayment(
   method: PaymentMethod,
 ): AsyncBox<
   PaymentResult,
-  | ReturnType<typeof CheckoutErrors.PaymentDeclined>
-  | ReturnType<typeof CheckoutErrors.PaymentProcessorError>
+  | ErrorType<typeof CheckoutErrors, "PaymentDeclined">
+  | ErrorType<typeof CheckoutErrors, "PaymentProcessorError">
 > {
   return AsyncBox.wrap({
     try: async () => {
@@ -274,7 +280,7 @@ function processPayment(
 function createOrder(
   cart: Cart,
   payment: PaymentResult,
-): AsyncBox<Order, ReturnType<typeof CheckoutErrors.OrderCreationFailed>> {
+): AsyncBox<Order, ErrorType<typeof CheckoutErrors, "OrderCreationFailed">> {
   return AsyncBox.wrap({
     try: async () => {
       await delay(40);
@@ -290,7 +296,7 @@ function createOrder(
 // 6. Send confirmation
 function sendConfirmation(
   order: Order,
-): AsyncBox<void, ReturnType<typeof CheckoutErrors.NotificationFailed>> {
+): AsyncBox<void, ErrorType<typeof CheckoutErrors, "NotificationFailed">> {
   return AsyncBox.wrap({
     try: async () => {
       await delay(30);

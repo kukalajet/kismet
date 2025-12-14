@@ -11,7 +11,13 @@
  * Run: deno run examples/01-basic-async.ts
  */
 
-import { AsyncBox, defineErrors, type ErrorsOf, t } from "../mod.ts";
+import {
+  AsyncBox,
+  defineErrors,
+  type ErrorsOf,
+  type ErrorType,
+  t,
+} from "../mod.ts";
 
 // Define domain-specific errors
 const BasicErrors = defineErrors({
@@ -30,7 +36,7 @@ function delay<T>(ms: number, value: T): Promise<T> {
 // 1. Simple async operation with random success/failure
 function simulateAsyncOperation(): AsyncBox<
   string,
-  ReturnType<typeof BasicErrors.TimeoutError>
+  ErrorType<typeof BasicErrors, "TimeoutError">
 > {
   const willSucceed = Math.random() > 0.3;
 
@@ -48,7 +54,7 @@ function simulateAsyncOperation(): AsyncBox<
 // 2. Fetch data - demonstrates AsyncBox.fromPromise()
 function fetchData(
   url: string,
-): AsyncBox<string, ReturnType<typeof BasicErrors.FetchError>> {
+): AsyncBox<string, ErrorType<typeof BasicErrors, "FetchError">> {
   // Simulate fetch with potential failure
   const willSucceed = Math.random() > 0.2;
 
@@ -72,7 +78,7 @@ function fetchData(
 // 3. Parse JSON - demonstrates AsyncBox.wrap() in both forms
 function _parseJsonSimple(
   text: string,
-): AsyncBox<unknown, ReturnType<typeof BasicErrors.ParseError>> {
+): AsyncBox<unknown, ErrorType<typeof BasicErrors, "ParseError">> {
   // Simple form: uses automatic error wrapping
   return AsyncBox.wrap(() => Promise.resolve(JSON.parse(text)))
     .mapErr((_unknownErr) => BasicErrors.ParseError({ input: text }));
@@ -80,7 +86,7 @@ function _parseJsonSimple(
 
 function parseJsonConfig(
   text: string,
-): AsyncBox<unknown, ReturnType<typeof BasicErrors.ParseError>> {
+): AsyncBox<unknown, ErrorType<typeof BasicErrors, "ParseError">> {
   // Config form: custom error handling with full type control
   return AsyncBox.wrap({
     try: async () => {

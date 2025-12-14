@@ -11,7 +11,13 @@
  * Run: deno run examples/02-api-client.ts
  */
 
-import { AsyncBox, defineErrors, type ErrorsOf, t } from "../mod.ts";
+import {
+  AsyncBox,
+  defineErrors,
+  type ErrorsOf,
+  type ErrorType,
+  t,
+} from "../mod.ts";
 
 // Define API-specific errors
 const ApiErrors = defineErrors({
@@ -189,7 +195,7 @@ function getUserPosts(userId: string): AsyncBox<Post[], ApiError> {
 // 5. Get user with fallback to cache - demonstrates catchTag
 function getUserWithFallback(
   id: string,
-): AsyncBox<User, Exclude<ApiError, ReturnType<typeof ApiErrors.NotFound>>> {
+): AsyncBox<User, Exclude<ApiError, ErrorType<typeof ApiErrors, "NotFound">>> {
   return getUser(id)
     .catchTag("NotFound", (error) => {
       console.log(`  → User ${error.resourceId} not found, checking cache...`);

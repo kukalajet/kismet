@@ -11,7 +11,13 @@
  * Run: deno run examples/07-file-operations.ts
  */
 
-import { AsyncBox, defineErrors, type ErrorsOf, t } from "../mod.ts";
+import {
+  AsyncBox,
+  defineErrors,
+  type ErrorsOf,
+  type ErrorType,
+  t,
+} from "../mod.ts";
 
 // Define file operation errors
 const FileErrors = defineErrors({
@@ -80,8 +86,8 @@ function readFile(
   path: string,
 ): AsyncBox<
   string,
-  | ReturnType<typeof FileErrors.NotFound>
-  | ReturnType<typeof FileErrors.PermissionDenied>
+  | ErrorType<typeof FileErrors, "NotFound">
+  | ErrorType<typeof FileErrors, "PermissionDenied">
 > {
   return AsyncBox.wrap({
     try: async () => {
@@ -103,8 +109,8 @@ function writeFile(
   content: string,
 ): AsyncBox<
   void,
-  | ReturnType<typeof FileErrors.PermissionDenied>
-  | ReturnType<typeof FileErrors.DiskFull>
+  | ErrorType<typeof FileErrors, "PermissionDenied">
+  | ErrorType<typeof FileErrors, "DiskFull">
 > {
   return AsyncBox.wrap({
     try: async () => {

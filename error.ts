@@ -255,6 +255,34 @@ export type ErrorsOf<D> = D extends Record<string, (...args: any) => infer E>
   : never;
 
 /**
+ * Extract a single error type from error definitions by key name.
+ *
+ * @typeParam D - The error definitions object from `defineErrors`
+ * @typeParam K - The key name of the specific error
+ * @returns The error type for that specific key
+ *
+ * @example
+ * ```typescript
+ * const UserErrors = defineErrors({
+ *   NotFound: { userId: t.string },
+ *   InvalidEmail: { email: t.string },
+ * });
+ *
+ * type NotFoundError = ErrorType<typeof UserErrors, "NotFound">;
+ * // Type: { _tag: "NotFound", userId: string }
+ *
+ * // Use in function signatures
+ * function findUser(id: string): AsyncBox<User, ErrorType<typeof UserErrors, "NotFound">> {
+ *   // ...
+ * }
+ * ```
+ */
+// deno-lint-ignore no-explicit-any
+export type ErrorType<D, K extends keyof D> = ReturnType<
+  D[K] extends (...args: any) => any ? D[K] : never
+>;
+
+/**
  * Extract the error type from a Result type.
  *
  * @typeParam R - A Result type

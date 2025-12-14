@@ -12,7 +12,13 @@
  * Run: deno run examples/05-parallel-operations.ts
  */
 
-import { AsyncBox, defineErrors, type ErrorsOf, t } from "../mod.ts";
+import {
+  AsyncBox,
+  defineErrors,
+  type ErrorsOf,
+  type ErrorType,
+  t,
+} from "../mod.ts";
 
 // Define parallel operation errors
 const ParallelErrors = defineErrors({
@@ -47,8 +53,8 @@ function fetchFromService(
   failureRate: number = 0.2,
 ): AsyncBox<
   ServiceResponse,
-  | ReturnType<typeof ParallelErrors.ServiceUnavailable>
-  | ReturnType<typeof ParallelErrors.Timeout>
+  | ErrorType<typeof ParallelErrors, "ServiceUnavailable">
+  | ErrorType<typeof ParallelErrors, "Timeout">
 > {
   return AsyncBox.wrap({
     try: async () => {
@@ -78,9 +84,9 @@ function parallelFetchAll(
   services: string[],
 ): AsyncBox<
   ServiceResponse[],
-  | ReturnType<typeof ParallelErrors.ServiceUnavailable>
-  | ReturnType<typeof ParallelErrors.Timeout>
-  | ReturnType<typeof ParallelErrors.AllFailed>
+  | ErrorType<typeof ParallelErrors, "ServiceUnavailable">
+  | ErrorType<typeof ParallelErrors, "Timeout">
+  | ErrorType<typeof ParallelErrors, "AllFailed">
 > {
   return AsyncBox.wrap({
     try: async () => {
@@ -103,8 +109,8 @@ function parallelFetchAll(
     catch: (e) => {
       if (e && typeof e === "object" && "_tag" in e) {
         return e as
-          | ReturnType<typeof ParallelErrors.ServiceUnavailable>
-          | ReturnType<typeof ParallelErrors.Timeout>;
+          | ErrorType<typeof ParallelErrors, "ServiceUnavailable">
+          | ErrorType<typeof ParallelErrors, "Timeout">;
       }
       return ParallelErrors.AllFailed({ attempted: services.length });
     },
@@ -114,7 +120,7 @@ function parallelFetchAll(
 // 3. Race - first success wins
 function parallelFetchAny(
   services: string[],
-): AsyncBox<ServiceResponse, ReturnType<typeof ParallelErrors.AllFailed>> {
+): AsyncBox<ServiceResponse, ErrorType<typeof ParallelErrors, "AllFailed">> {
   return AsyncBox.wrap({
     try: async () => {
       const promises = services.map((service) =>

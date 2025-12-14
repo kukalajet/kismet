@@ -5,6 +5,7 @@ import {
   type ErrorByTag,
   type ErrorOf,
   type ErrorsOf,
+  type ErrorType,
   type ExcludeByTag,
   makeTaggedError,
   type SuccessOf,
@@ -1073,15 +1074,16 @@ Deno.test("ErrorOf type helper", async (t) => {
     // Test that the extracted type works correctly by assigning to it
     const error: ExtractedError = UserErrors.NotFound({ userId: "123" });
     // Type assertion to access properties (TypeScript inference limitation)
-    const notFoundError = error as ReturnType<typeof UserErrors.NotFound>;
+    const notFoundError = error as ErrorType<typeof UserErrors, "NotFound">;
     assertEquals(notFoundError._tag, "NotFound");
     assertEquals(notFoundError.userId, "123");
 
     const validationError: ExtractedError = UserErrors.ValidationError({
       field: "email",
     });
-    const valError = validationError as ReturnType<
-      typeof UserErrors.ValidationError
+    const valError = validationError as ErrorType<
+      typeof UserErrors,
+      "ValidationError"
     >;
     assertEquals(valError._tag, "ValidationError");
     assertEquals(valError.field, "email");
