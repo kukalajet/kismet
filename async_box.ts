@@ -212,7 +212,7 @@ export class AsyncBox<T, E> {
    * const name = await result.unwrapOr(""); // "ALICE"
    * ```
    */
-  map<U>(fn: (value: T) => U): AsyncBox<U, E> {
+  map<U>(this: AsyncBox<T, E>, fn: (value: T) => U): AsyncBox<U, E> {
     return new AsyncBox(
       this.promise.then((r) => (isOk(r) ? ok(fn(r.value)) : r)),
     );
@@ -231,7 +231,7 @@ export class AsyncBox<T, E> {
    *   .mapErr(e => ({ ...e, _tag: "HttpError" as const }));
    * ```
    */
-  mapErr<F>(fn: (error: E) => F): AsyncBox<T, F> {
+  mapErr<F>(this: AsyncBox<T, E>, fn: (error: E) => F): AsyncBox<T, F> {
     return new AsyncBox(
       this.promise.then((r) => (isErr(r) ? err(fn(r.error)) : r)),
     );
@@ -260,7 +260,10 @@ export class AsyncBox<T, E> {
    *   .map(u => u.name);
    * ```
    */
-  tap(fn: (value: T) => void | Promise<void>): AsyncBox<T, E> {
+  tap(
+    this: AsyncBox<T, E>,
+    fn: (value: T) => void | Promise<void>,
+  ): AsyncBox<T, E> {
     return new AsyncBox(
       this.promise.then(async (r) => {
         if (isOk(r)) {
@@ -294,7 +297,10 @@ export class AsyncBox<T, E> {
    *   .unwrapOr(null);
    * ```
    */
-  tapErr(fn: (error: E) => void | Promise<void>): AsyncBox<T, E> {
+  tapErr(
+    this: AsyncBox<T, E>,
+    fn: (error: E) => void | Promise<void>,
+  ): AsyncBox<T, E> {
     return new AsyncBox(
       this.promise.then(async (r) => {
         if (isErr(r)) {
@@ -323,7 +329,10 @@ export class AsyncBox<T, E> {
    * // Type: AsyncBox<Post[], FetchError>
    * ```
    */
-  flatMap<U, F>(fn: (value: T) => AsyncBox<U, F>): AsyncBox<U, E | F> {
+  flatMap<U, F>(
+    this: AsyncBox<T, E>,
+    fn: (value: T) => AsyncBox<U, F>,
+  ): AsyncBox<U, E | F> {
     return new AsyncBox(
       // eslint-disable-next-line @typescript-eslint/promise-function-async
       this.promise.then((r) =>
@@ -351,6 +360,7 @@ export class AsyncBox<T, E> {
    * ```
    */
   catchTag<Tag extends AllTags<E & TaggedError>, U, F>(
+    this: AsyncBox<T, E>,
     tag: Tag,
     handler: (error: ErrorByTag<E & TaggedError, Tag>) => AsyncBox<U, F>,
   ): AsyncBox<T | U, Exclude<E, ErrorByTag<E & TaggedError, Tag>> | F> {
@@ -394,7 +404,10 @@ export class AsyncBox<T, E> {
    *   });
    * ```
    */
-  catchAll<U, F>(handler: (error: E) => AsyncBox<U, F>): AsyncBox<T | U, F> {
+  catchAll<U, F>(
+    this: AsyncBox<T, E>,
+    handler: (error: E) => AsyncBox<U, F>,
+  ): AsyncBox<T | U, F> {
     return new AsyncBox(
       // eslint-disable-next-line @typescript-eslint/promise-function-async
       this.promise.then((r) =>
@@ -418,7 +431,7 @@ export class AsyncBox<T, E> {
    * });
    * ```
    */
-  async match<R>(handlers: {
+  async match<R>(this: AsyncBox<T, E>, handlers: {
     ok: (value: T) => R;
     err: (error: E) => R;
   }): Promise<R> {

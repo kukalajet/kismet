@@ -214,7 +214,7 @@ export class Box<T, E> {
    * console.log(errResult.isErr()); // true
    * ```
    */
-  map<U>(fn: (value: T) => U): Box<U, E> {
+  map<U>(this: Box<T, E>, fn: (value: T) => U): Box<U, E> {
     return new Box(isOk(this.result) ? ok(fn(this.result.value)) : this.result);
   }
 
@@ -238,7 +238,7 @@ export class Box<T, E> {
    * console.log(okResult.unwrap()); // 42
    * ```
    */
-  mapErr<F>(fn: (error: E) => F): Box<T, F> {
+  mapErr<F>(this: Box<T, E>, fn: (error: E) => F): Box<T, F> {
     return new Box(
       isErr(this.result) ? err(fn(this.result.error)) : this.result,
     );
@@ -265,7 +265,7 @@ export class Box<T, E> {
    *   .tap(value => console.log("This won't run"));
    * ```
    */
-  tap(fn: (value: T) => void): Box<T, E> {
+  tap(this: Box<T, E>, fn: (value: T) => void): Box<T, E> {
     if (isOk(this.result)) {
       fn(this.result.value);
     }
@@ -293,7 +293,7 @@ export class Box<T, E> {
    *   .tapErr(error => console.log("This won't run"));
    * ```
    */
-  tapErr(fn: (error: E) => void): Box<T, E> {
+  tapErr(this: Box<T, E>, fn: (error: E) => void): Box<T, E> {
     if (isErr(this.result)) {
       fn(this.result.error);
     }
@@ -334,7 +334,7 @@ export class Box<T, E> {
    * // Returns ParseError, validate is never called
    * ```
    */
-  flatMap<U, F>(fn: (value: T) => Box<U, F>): Box<U, E | F> {
+  flatMap<U, F>(this: Box<T, E>, fn: (value: T) => Box<U, F>): Box<U, E | F> {
     if (isOk(this.result)) {
       return fn(this.result.value) as Box<U, E | F>;
     }
@@ -372,6 +372,7 @@ export class Box<T, E> {
    * ```
    */
   catchTag<Tag extends AllTags<E & TaggedError>, U, F>(
+    this: Box<T, E>,
     tag: Tag,
     handler: (error: ErrorByTag<E & TaggedError, Tag>) => Box<U, F>,
   ): Box<T | U, ExcludeByTag<E, Tag> | F> {
@@ -419,7 +420,10 @@ export class Box<T, E> {
    * // Type: Box<Data, CacheError>
    * ```
    */
-  catchAll<U, F>(handler: (error: E) => Box<U, F>): Box<T | U, F> {
+  catchAll<U, F>(
+    this: Box<T, E>,
+    handler: (error: E) => Box<U, F>,
+  ): Box<T | U, F> {
     if (isErr(this.result)) {
       return handler(this.result.error) as Box<T | U, F>;
     }
@@ -452,6 +456,7 @@ export class Box<T, E> {
    * ```
    */
   orElseTag<Tag extends AllTags<E & TaggedError>>(
+    this: Box<T, E>,
     tag: Tag,
     fallback: T,
   ): Box<T, ExcludeByTag<E, Tag>> {
@@ -491,7 +496,10 @@ export class Box<T, E> {
    * });
    * ```
    */
-  match<R>(handlers: { ok: (value: T) => R; err: (error: E) => R }): R {
+  match<R>(
+    this: Box<T, E>,
+    handlers: { ok: (value: T) => R; err: (error: E) => R },
+  ): R {
     return isOk(this.result)
       ? handlers.ok(this.result.value)
       : handlers.err(this.result.error);
